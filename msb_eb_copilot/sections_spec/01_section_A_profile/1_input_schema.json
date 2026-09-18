@@ -1,0 +1,227 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Section_A_Input_Schema",
+  "description": "Schema định nghĩa chi tiết 4 nguồn dữ liệu đầu vào cho Phần A (Tóm tắt thông tin chung) theo chuẩn MSB MB07",
+  "type": "object",
+  "required": [
+    "ocr_from_documents",
+    "rm_provided_inputs",
+    "linked_from_section_e",
+    "auto_default_flags"
+  ],
+  "properties": {
+    "ocr_from_documents": {
+      "type": "object",
+      "description": "Dữ liệu bóc tách tự động qua OCR/Parser từ Đăng ký kinh doanh, Điều lệ và Excel BCTC",
+      "required": [
+        "company_name",
+        "company_short_name",
+        "enterprise_type",
+        "headquarters_address",
+        "tax_code_business_reg_no",
+        "business_reg_date",
+        "business_reg_place",
+        "operation_start_date",
+        "legal_representative_name",
+        "legal_representative_title",
+        "charter_capital_registered_vnd",
+        "latest_year_revenue_vnd"
+      ],
+      "properties": {
+        "company_name": {
+          "type": "string",
+          "description": "Tên khách hàng doanh nghiệp đầy đủ (Nguồn: ĐKKD)"
+        },
+        "company_short_name": {
+          "type": "string",
+          "description": "Tên viết tắt / Mã chứng khoán (Nguồn: ĐKKD)"
+        },
+        "enterprise_type": {
+          "type": "string",
+          "description": "Loại hình doanh nghiệp (CP, TNHH,...) (Nguồn: ĐKKD)"
+        },
+        "headquarters_address": {
+          "type": "string",
+          "description": "Địa chỉ trụ sở chính (Nguồn: ĐKKD)"
+        },
+        "tax_code_business_reg_no": {
+          "type": "string",
+          "description": "Số đăng ký kinh doanh / Mã số thuế (Nguồn: ĐKKD)"
+        },
+        "business_reg_date": {
+          "type": "string",
+          "description": "Ngày cấp ĐKKD / Lần thay đổi gần nhất (Nguồn: ĐKKD)"
+        },
+        "business_reg_place": {
+          "type": "string",
+          "description": "Nơi cấp ĐKKD (Sở KH&ĐT tỉnh/thành) (Nguồn: ĐKKD)"
+        },
+        "operation_start_date": {
+          "type": "string",
+          "description": "Thời gian bắt đầu hoạt động (Nguồn: ĐKKD)"
+        },
+        "legal_representative_name": {
+          "type": "string",
+          "description": "Người đại diện theo pháp luật (Nguồn: ĐKKD / Điều lệ)"
+        },
+        "legal_representative_title": {
+          "type": "string",
+          "description": "Chức vụ của Người ĐDPL (Nguồn: ĐKKD / Điều lệ)"
+        },
+        "group_affiliation": {
+          "type": "string",
+          "description": "Thuộc nhóm, tập đoàn (Nguồn: Điều lệ hoặc RM cung cấp)"
+        },
+        "charter_capital_registered_vnd": {
+          "type": "number",
+          "description": "Vốn điều lệ đăng ký (triệu đồng) (Nguồn: Điều lệ / ĐKKD)"
+        },
+        "latest_year_revenue_vnd": {
+          "type": "number",
+          "description": "Doanh thu thuần năm gần nhất (triệu đồng) (Nguồn: Excel BCTC, sheet 'Tờ trình')"
+        }
+      }
+    },
+
+    "rm_provided_inputs": {
+      "type": "object",
+      "description": "Các trường bắt buộc RM phải cung cấp hoặc chọn trên Web UI",
+      "required": [
+        "cif_number",
+        "customer_status",
+        "customer_segment",
+        "credit_applicant_representative",
+        "industry_level_5_code",
+        "industry_level_5_name",
+        "industry_revenue_share",
+        "main_business_activity",
+        "main_products",
+        "actual_contributed_capital_vnd",
+        "contributed_capital_as_of_date",
+        "internal_rating_dvkd"
+      ],
+      "properties": {
+        "cif_number": {
+          "type": "string",
+          "description": "Mã CIF khách hàng trên hệ thống CoreBanking"
+        },
+        "customer_status": {
+          "type": "string",
+          "enum": ["KH mới", "KH hiện hữu"],
+          "description": "Tình trạng khách hàng tại MSB"
+        },
+        "customer_segment": {
+          "type": "string",
+          "enum": ["LC", "LMC", "Khác"],
+          "description": "Đối tượng khách hàng: LC (Large Corporate), LMC (Large Mid Corporate), Khác"
+        },
+        "credit_applicant_representative": {
+          "type": "string",
+          "description": "Người đại diện đề nghị cấp tín dụng (Họ tên & Chức vụ)"
+        },
+        "industry_level_5_code": {
+          "type": "string",
+          "description": "Mã ngành cấp 5 theo chuẩn hệ thống ngành kinh tế Việt Nam"
+        },
+        "industry_level_5_name": {
+          "type": "string",
+          "description": "Tên ngành cấp 5"
+        },
+        "industry_revenue_share": {
+          "type": "string",
+          "description": "Tỷ trọng doanh thu của ngành chính (%)"
+        },
+        "main_business_activity": {
+          "type": "string",
+          "description": "Ngành nghề kinh doanh chính thực tế"
+        },
+        "main_products": {
+          "type": "string",
+          "description": "Các sản phẩm/dịch vụ kinh doanh chính"
+        },
+        "actual_contributed_capital_vnd": {
+          "type": "number",
+          "description": "Vốn thực góp (triệu đồng) (Nguồn: RM cung cấp / BCTC)"
+        },
+        "contributed_capital_as_of_date": {
+          "type": "string",
+          "description": "Tính đến ngày ghi nhận vốn thực góp"
+        },
+        "internal_rating_dvkd": {
+          "type": "object",
+          "description": "Xếp hạng tín dụng nội bộ theo ĐVKD",
+          "properties": {
+            "profile_id": { "type": "string", "description": "Mã ID của hồ sơ trên hệ thống XHTD" },
+            "rating_grade": { "type": "string", "description": "Hạng tín dụng (ví dụ: A+, AA, AAA)" },
+            "rating_score": { "type": "number", "description": "Số điểm xếp hạng (ví dụ: 85.5)" }
+          }
+        },
+        "approval_authority_matrix": {
+          "type": "object",
+          "description": "Thẩm quyền phê duyệt tín dụng lần này",
+          "properties": {
+            "existing_approved_limit_total_vnd": { "type": "number", "description": "HMTD đã cấp cho KH & nhóm liên quan: Giá trị tổng HMTD" },
+            "existing_approved_limit_unsecured_vnd": { "type": "number", "description": "HMTD đã cấp cho KH & nhóm liên quan: Giá trị HMTD không TSBĐ" },
+            "proposed_limit_total_vnd": { "type": "number", "description": "HMTD đề xuất cấp cho KH lần này: Giá trị tổng HMTD" },
+            "proposed_limit_unsecured_vnd": { "type": "number", "description": "HMTD đề xuất cấp cho KH lần này: Giá trị HMTD không TSBĐ" },
+            "target_approval_level": {
+              "type": "string",
+              "enum": ["HĐTD&ĐT", "HĐTDCC", "HĐQT"],
+              "description": "Thẩm quyền phê duyệt đề xuất lần này"
+            }
+          }
+        },
+        "latest_approval_session": {
+          "type": "string",
+          "description": "Kỳ phê duyệt gần nhất (nếu có, đối với KH hiện hữu/tái cấp)"
+        },
+        "credit_proposal_type": {
+          "type": "string",
+          "enum": ["Cấp mới", "Tái cấp"],
+          "description": "Đề xuất nhu cầu tín dụng"
+        }
+      }
+    },
+
+    "linked_from_section_e": {
+      "type": "object",
+      "description": "Dữ liệu được tự động liên kết (link) từ Phần E (Báo cáo CIC)",
+      "required": [
+        "outstanding_loan_at_msb_vnd",
+        "total_credit_exposure_at_msb_vnd"
+      ],
+      "properties": {
+        "outstanding_loan_at_msb_vnd": {
+          "type": "number",
+          "description": "Dư nợ cho vay của Khách hàng và người có liên quan tại MSB (triệu đồng)"
+        },
+        "total_credit_exposure_at_msb_vnd": {
+          "type": "number",
+          "description": "Tổng dư tín dụng của Khách hàng và người có liên quan tại MSB (Bao gồm cho vay + L/C + Bảo lãnh) (triệu đồng)"
+        }
+      }
+    },
+
+    "auto_default_flags": {
+      "type": "object",
+      "description": "Các trường hệ thống tự động chọn mặc định theo chuẩn chính sách MSB",
+      "properties": {
+        "restricted_credit_subject": {
+          "type": "string",
+          "default": "Không",
+          "description": "Khách hàng thuộc đối tượng hạn chế cấp tín dụng hay không? (Auto chọn 'Không')"
+        },
+        "environmental_social_risk_esg": {
+          "type": "string",
+          "default": "Không thuộc đối tượng",
+          "description": "Quản lý rủi ro MTXH (Auto chọn 'Không thuộc đối tượng phải đánh giá rủi ro MTXH theo quy định MSB')"
+        },
+        "sbv_single_borrower_limit_check": {
+          "type": "string",
+          "default": "Trong giới hạn",
+          "description": "So với quy định của Ngân hàng Nhà nước (Auto chọn 'Trong giới hạn')"
+        }
+      }
+    }
+  }
+}

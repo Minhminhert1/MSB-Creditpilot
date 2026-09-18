@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MSB_EB_Section_D_Financial_Analysis_And_MB09_Schema",
+  "description": "Schema chuẩn cho PHẦN D: PHÂN TÍCH TÌNH HÌNH TÀI CHÍNH & TÍNH TOÁN NHU CẦU TÍN DỤNG theo quy định MSB. Bao gồm: BCTC 3 năm (P&L, Balance Sheet), Chỉ số tài chính, Bảng tính Nhu cầu vốn MB09 (TT39), và Mô phỏng Basel II RORWA / TORWA.",
+  "type": "object",
+  "required": [
+    "income_statement_3y",
+    "balance_sheet_3y",
+    "financial_ratios_3y",
+    "working_capital_turnover",
+    "mb09_credit_demand_calculation",
+    "basel_ii_rorwa_simulation"
+  ],
+  "properties": {
+    "income_statement_3y": {
+      "type": "object",
+      "description": "1. Báo cáo Kết quả Hoạt động Kinh doanh 3 năm (triệu VND)",
+      "properties": {
+        "years": { "type": "array", "items": { "type": "string" }, "default": ["2022", "2023", "2024"] },
+        "net_revenue": { "type": "array", "items": { "type": "number" } },
+        "cogs": { "type": "array", "items": { "type": "number" } },
+        "gross_profit": { "type": "array", "items": { "type": "number" } },
+        "financial_income": { "type": "array", "items": { "type": "number" } },
+        "financial_expenses": { "type": "array", "items": { "type": "number" } },
+        "interest_expenses": { "type": "array", "items": { "type": "number" } },
+        "sga_expenses": { "type": "array", "items": { "type": "number" } },
+        "net_profit_after_tax": { "type": "array", "items": { "type": "number" } }
+      }
+    },
+    "balance_sheet_3y": {
+      "type": "object",
+      "description": "2. Bảng Cân đối Kế toán 3 năm (triệu VND)",
+      "properties": {
+        "total_assets": { "type": "array", "items": { "type": "number" } },
+        "current_assets": { "type": "array", "items": { "type": "number" } },
+        "cash_and_equivalents": { "type": "array", "items": { "type": "number" } },
+        "short_term_investments": { "type": "array", "items": { "type": "number" } },
+        "accounts_receivable": { "type": "array", "items": { "type": "number" } },
+        "inventories": { "type": "array", "items": { "type": "number" } },
+        "non_current_assets": { "type": "array", "items": { "type": "number" } },
+        "fixed_assets": { "type": "array", "items": { "type": "number" } },
+        "total_liabilities": { "type": "array", "items": { "type": "number" } },
+        "current_liabilities": { "type": "array", "items": { "type": "number" } },
+        "accounts_payable": { "type": "array", "items": { "type": "number" } },
+        "short_term_debt": { "type": "array", "items": { "type": "number" } },
+        "long_term_debt": { "type": "array", "items": { "type": "number" } },
+        "owners_equity": { "type": "array", "items": { "type": "number" } }
+      }
+    },
+    "financial_ratios_3y": {
+      "type": "object",
+      "description": "3. Các Chỉ số Tài chính & Khả năng Thanh toán",
+      "properties": {
+        "current_ratio": { "type": "array", "items": { "type": "number" } },
+        "quick_ratio": { "type": "array", "items": { "type": "number" } },
+        "debt_to_equity": { "type": "array", "items": { "type": "number" } },
+        "total_debt_to_equity": { "type": "array", "items": { "type": "number" } },
+        "dscr_icr": { "type": "array", "items": { "type": "number" } },
+        "ros": { "type": "array", "items": { "type": "number" } },
+        "roe": { "type": "array", "items": { "type": "number" } },
+        "roa": { "type": "array", "items": { "type": "number" } }
+      }
+    },
+    "working_capital_turnover": {
+      "type": "object",
+      "description": "4. Vòng quay Vốn lưu động & Chu kỳ tiền mặt (ngày)",
+      "properties": {
+        "dso_days": { "type": "number", "description": "Số ngày thu tiền bình quân (DSO)" },
+        "dio_days": { "type": "number", "description": "Số ngày tồn kho bình quân (DIO)" },
+        "dpo_days": { "type": "number", "description": "Số ngày trả tiền bình quân (DPO)" },
+        "cash_conversion_cycle_days": { "type": "number", "description": "Chu kỳ tiền mặt CCC (ngày)" },
+        "working_capital_turnover_annual": { "type": "number", "description": "Vòng quay VLĐ (vòng/năm)" }
+      }
+    },
+    "mb09_credit_demand_calculation": {
+      "type": "object",
+      "description": "5. Bảng tính Nhu cầu Vốn MB09 (triệu VND)",
+      "properties": {
+        "target_revenue_vnd": { "type": "number", "description": "Doanh thu kế hoạch năm tới" },
+        "target_operating_expenses_vnd": { "type": "number", "description": "Tổng chi phí hoạt động SXKD" },
+        "working_capital_demand_per_cycle_vnd": { "type": "number", "description": "Nhu cầu VLĐ cho 1 chu kỳ (Chi phí / Vòng quay)" },
+        "own_working_capital_nwc_vnd": { "type": "number", "description": "Vốn tự có tham gia (VLĐ ròng)" },
+        "other_mobilized_capital_vnd": { "type": "number", "description": "Vốn chiếm dụng NCC / Vốn khác" },
+        "total_credit_demand_all_banks_vnd": { "type": "number", "description": "Tổng nhu cầu vay vốn tại các TCTD" },
+        "msb_proposed_facility_limit_vnd": { "type": "number", "description": "Hạn mức đề xuất tại MSB" },
+        "msb_financing_share_percentage": { "type": "string", "description": "Tỷ lệ tài trợ của MSB trong tổng nhu cầu TCTD" }
+      }
+    },
+    "basel_ii_rorwa_simulation": {
+      "type": "object",
+      "description": "6. Mô phỏng Lợi nhuận điều chỉnh rủi ro Basel II",
+      "properties": {
+        "total_operating_income_toi_vnd": { "type": "number", "description": "Tổng thu nhập hoạt động (NII + Non-II)" },
+        "net_interest_income_nii_vnd": { "type": "number", "description": "Thu nhập lãi thuần (NII)" },
+        "non_interest_income_fee_vnd": { "type": "number", "description": "Thu nhập ngoài lãi (Phí LC, BL, FX)" },
+        "risk_weighted_assets_rwa_vnd": { "type": "number", "description": "Tài sản có rủi ro quy đổi (RWA)" },
+        "expected_loss_el_vnd": { "type": "number", "description": "Chi phí tổn thất rủi ro kỳ vọng (EL = PD x LGD x EAD)" },
+        "operating_cost_opex_vnd": { "type": "number", "description": "Chi phí hoạt động phân bổ" },
+        "rorwa_percentage": { "type": "number", "description": "Tỷ suất sinh lời trên RWA (%)" },
+        "torwa_vnd": { "type": "number", "description": "Tổng lợi nhuận điều chỉnh rủi ro TORWA (triệu VND)" },
+        "hurdle_rate_met": { "type": "boolean", "description": "Đạt ngưỡng sàn RORWA của MSB (>= 2.5%)" }
+      }
+    }
+  }
+}

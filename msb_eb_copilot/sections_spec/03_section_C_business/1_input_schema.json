@@ -1,0 +1,202 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MSB_EB_Section_C_Business_Operations_Input_Schema",
+  "description": "Schema đầu vào chuẩn cho PHẦN C: HOẠT ĐỘNG KINH DOANH CỦA KHÁCH HÀNG theo biểu mẫu MB07 của MSB. Bao gồm: Lịch sử hình thành, Cơ cấu sở hữu, Ban lãnh đạo, Mô hình SXKD & Công nghệ, Chuỗi cung ứng Đầu vào (Nhà cung cấp) và Đầu ra (Khách hàng & Đối thủ).",
+  "type": "object",
+  "required": [
+    "company_history",
+    "ownership_and_governance",
+    "management_team",
+    "business_model_and_products",
+    "inbound_supply_chain",
+    "outbound_distribution"
+  ],
+  "properties": {
+    "company_history": {
+      "type": "object",
+      "description": "1. Lịch sử hình thành và phát triển",
+      "properties": {
+        "founding_year": { "type": "integer", "description": "Năm thành lập" },
+        "history_narrative": { "type": "string", "description": "Tóm tắt quá trình hình thành, các mốc phát triển quan trọng" },
+        "capital_increase_milestones": {
+          "type": "array",
+          "description": "Lịch sử tăng vốn qua các thời kỳ",
+          "items": {
+            "type": "object",
+            "properties": {
+              "effective_date": { "type": "string" },
+              "charter_capital_vnd": { "type": "number", "description": "Vốn điều lệ (triệu VND)" },
+              "event_description": { "type": "string", "description": "Sự kiện tăng vốn / đổi giấy phép" }
+            }
+          }
+        },
+        "stock_listing_info": {
+          "type": "object",
+          "description": "Thông tin niêm yết (nếu có)",
+          "properties": {
+            "is_listed": { "type": "boolean", "default": false },
+            "stock_ticker": { "type": "string" },
+            "exchange": { "type": "string", "enum": ["HOSE", "HNX", "UPCoM", "Chưa niêm yết"] },
+            "recent_price_range": { "type": "string" },
+            "dividend_policy": { "type": "string" }
+          }
+        }
+      }
+    },
+    "ownership_and_governance": {
+      "type": "object",
+      "description": "2. Chủ sở hữu và Người có liên quan (Ownership & Governance)",
+      "properties": {
+        "parent_company_name": { "type": "string", "description": "Tên công ty mẹ / Tập đoàn chi phối" },
+        "parent_company_ownership_ratio": { "type": "string", "description": "Tỷ lệ sở hữu của công ty mẹ (ví dụ: 100%)" },
+        "major_shareholders": {
+          "type": "array",
+          "description": "Danh sách cổ đông lớn / thành viên góp vốn (≥ 5%)",
+          "items": {
+            "type": "object",
+            "properties": {
+              "shareholder_name": { "type": "string" },
+              "id_tax_code": { "type": "string" },
+              "ownership_percentage": { "type": "string" },
+              "contributed_capital_vnd": { "type": "number" },
+              "role_description": { "type": "string" }
+            }
+          }
+        },
+        "subsidiaries_and_affiliates": {
+          "type": "array",
+          "description": "Danh sách công ty con, công ty liên kết, đơn vị trực thuộc",
+          "items": {
+            "type": "object",
+            "properties": {
+              "company_name": { "type": "string" },
+              "relationship_type": { "type": "string", "enum": ["Công ty con", "Công ty liên kết", "Đơn vị thành viên", "Chi nhánh"] },
+              "ownership_ratio": { "type": "string" },
+              "main_business": { "type": "string" }
+            }
+          }
+        },
+        "blacklist_and_restricted_status": {
+          "type": "string",
+          "default": "Không thuộc danh sách Blacklist, không vi phạm Điều 126 Luật TCTD"
+        }
+      }
+    },
+    "management_team": {
+      "type": "object",
+      "description": "3. Cơ cấu tổ chức và Ban lãnh đạo chủ chốt",
+      "properties": {
+        "board_of_members_or_directors": {
+          "type": "array",
+          "description": "Danh sách thành viên HĐTV / HĐQT",
+          "items": {
+            "type": "object",
+            "properties": {
+              "full_name": { "type": "string" },
+              "title": { "type": "string" },
+              "qualification": { "type": "string" },
+              "industry_experience_years": { "type": "integer" }
+            }
+          }
+        },
+        "executive_board": {
+          "type": "object",
+          "description": "Ban Tổng giám đốc & Kế toán trưởng",
+          "properties": {
+            "general_director_name": { "type": "string" },
+            "general_director_profile": { "type": "string" },
+            "chief_accountant_name": { "type": "string" },
+            "chief_accountant_profile": { "type": "string" }
+          }
+        },
+        "headcount_and_departments": {
+          "type": "object",
+          "properties": {
+            "total_employees": { "type": "integer" },
+            "organizational_structure_summary": { "type": "string" }
+          }
+        }
+      }
+    },
+    "business_model_and_products": {
+      "type": "object",
+      "description": "4. Mô hình kinh doanh & Công nghệ sản xuất",
+      "properties": {
+        "core_business_model": { "type": "string", "description": "Mô tả mô hình hoạt động cốt lõi" },
+        "main_products_portfolio": {
+          "type": "array",
+          "description": "Danh mục sản phẩm chính và thương hiệu",
+          "items": {
+            "type": "object",
+            "properties": {
+              "product_name": { "type": "string" },
+              "brand_name": { "type": "string" },
+              "revenue_contribution_percentage": { "type": "string" },
+              "quality_standards": { "type": "string" }
+            }
+          }
+        },
+        "production_technology_and_capacity": {
+          "type": "object",
+          "properties": {
+            "factory_locations": { "type": "string" },
+            "technology_description": { "type": "string" },
+            "designed_capacity_annual": { "type": "string" },
+            "actual_utilization_rate": { "type": "string" }
+          }
+        }
+      }
+    },
+    "inbound_supply_chain": {
+      "type": "object",
+      "description": "5. Thị trường Đầu vào & Nhà cung cấp chính",
+      "properties": {
+        "raw_materials_overview": { "type": "string", "description": "Tổng quan nguyên vật liệu đầu vào chính" },
+        "pricing_mechanism": { "type": "string", "description": "Cơ chế định giá mua NVL và biến động thị trường" },
+        "top_suppliers": {
+          "type": "array",
+          "description": "Danh sách 5-10 nhà cung cấp lớn nhất",
+          "items": {
+            "type": "object",
+            "properties": {
+              "supplier_name": { "type": "string" },
+              "supplied_goods": { "type": "string" },
+              "annual_purchase_value_vnd": { "type": "number" },
+              "purchase_share_percentage": { "type": "string" },
+              "payment_terms": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "outbound_distribution": {
+      "type": "object",
+      "description": "6. Thị trường Đầu ra, Khách hàng & Đối thủ cạnh tranh",
+      "properties": {
+        "distribution_channels": { "type": "string", "description": "Kênh phân phối (Đại lý, trực tiếp, xuất khẩu)" },
+        "market_share_and_competitors": {
+          "type": "object",
+          "properties": {
+            "market_share_estimate": { "type": "string" },
+            "top_competitors": { "type": "array", "items": { "type": "string" } },
+            "competitive_advantages": { "type": "string" }
+          }
+        },
+        "top_customers": {
+          "type": "array",
+          "description": "Danh sách 5-10 khách hàng tiêu thụ lớn nhất",
+          "items": {
+            "type": "object",
+            "properties": {
+              "customer_name": { "type": "string" },
+              "product_purchased": { "type": "string" },
+              "revenue_share_percentage": { "type": "string" },
+              "credit_terms": { "type": "string" }
+            }
+          }
+        },
+        "receivables_and_credit_policy": { "type": "string", "description": "Chính sách quản lý công nợ và thu hồi nợ" }
+      }
+    }
+  }
+}

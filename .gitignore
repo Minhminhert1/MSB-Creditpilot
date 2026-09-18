@@ -1,0 +1,22 @@
+.env
+.env.*
+*.key
+__pycache__/
+.pytest_cache/
+output/
+uploads/
+tmp/
+.DS_Store
+*.pyc
+*.pyo
+*.db
+~$*
+~WRL*
+# Internal / sensitive documents
+*.xlsx
+*.docx
+Tham khảo/
+case_input_template.json
+
+*.doc
+Tham*/

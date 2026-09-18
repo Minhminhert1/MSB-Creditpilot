@@ -1,0 +1,227 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<<
+/Producer (pypdf)
+>>
+endobj
+2 0 obj
+<<
+/Type /Pages
+/Count 2
+/Kids [ 4 0 R 10 0 R ]
+>>
+endobj
+3 0 obj
+<<
+/Type /Catalog
+/Pages 2 0 R
+>>
+endobj
+4 0 obj
+<<
+/Type /Page
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font <<
+/F1 5 0 R
+>>
+>>
+/Contents 9 0 R
+/Parent 2 0 R
+>>
+endobj
+5 0 obj
+<<
+/Type /Font
+/Subtype /Type0
+/BaseFont /Helvetica
+/Encoding /Identity-H
+/DescendantFonts [ 6 0 R ]
+/ToUnicode 8 0 R
+>>
+endobj
+6 0 obj
+<<
+/Type /Font
+/Subtype /CIDFontType2
+/BaseFont /Helvetica
+/CIDSystemInfo <<
+/Registry (Adobe)
+/Ordering (Identity)
+/Supplement 0
+>>
+/FontDescriptor 7 0 R
+/DW 1000
+>>
+endobj
+7 0 obj
+<<
+/Type /FontDescriptor
+/FontName /Helvetica
+/Flags 4
+/FontBBox [ -100 -200 1000 900 ]
+/ItalicAngle 0
+/Ascent 800
+/Descent -200
+/CapHeight 700
+/StemV 80
+>>
+endobj
+8 0 obj
+<<
+/Length 1274
+>>
+stream
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Custom-ToUnicode def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+68 beginbfchar
+<0001> <000A>
+<0002> <0020>
+<0003> <002C>
+<0004> <002E>
+<0005> <0030>
+<0006> <0031>
+<0007> <0032>
+<0008> <0033>
+<0009> <0034>
+<000A> <0035>
+<000B> <0036>
+<000C> <0037>
+<000D> <003A>
+<000E> <0041>
+<000F> <0042>
+<0010> <0043>
+<0011> <0047>
+<0012> <0048>
+<0013> <004A>
+<0014> <004D>
+<0015> <004E>
+<0016> <0050>
+<0017> <0053>
+<0018> <0054>
+<0019> <0056>
+<001A> <0059>
+<001B> <0061>
+<001C> <0063>
+<001D> <0064>
+<001E> <0067>
+<001F> <0068>
+<0020> <0069>
+<0021> <006C>
+<0022> <006D>
+<0023> <006E>
+<0024> <006F>
+<0025> <0070>
+<0026> <0072>
+<0027> <0073>
+<0028> <0074>
+<0029> <0075>
+<002A> <0076>
+<002B> <0079>
+<002C> <00D4>
+<002D> <00E0>
+<002E> <00E1>
+<002F> <00E3>
+<0030> <00EA>
+<0031> <00ED>
+<0032> <0103>
+<0033> <0110>
+<0034> <0111>
+<0035> <1EA6>
+<0036> <1EAF>
+<0037> <1EBF>
+<0038> <1EC1>
+<0039> <1EC5>
+<003A> <1EC7>
+<003B> <1EC9>
+<003C> <1ECB>
+<003D> <1ECD>
+<003E> <1ED1>
+<003F> <1ED3>
+<0040> <1ED4>
+<0041> <1ED9>
+<0042> <1EDF>
+<0043> <1EE5>
+<0044> <1EE9>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+endstream
+endobj
+9 0 obj
+<<
+/Length 595
+>>
+stream
+BT
+/F1 12 Tf
+14 TL
+72 720 Td
+<0018003000230002001D0024001B0023001F00020023001E001F0020003A0025000D00020010002C0015001100020018001A000200100040000200160012003500150002000E000F0010> Tj T*
+<0018003000230002002A0020003700280002002800360028000D0002000E000F00100002001300170010> Tj T*
+<0014002F00020027003E0002001D0024001B0023001F00020023001E001F0020003A0025000D00020005000600050006000700080009000A000B000C> Tj T*
+<0033003C001B0002001C001F003B00020028002600430002002700420002001C001F00310023001F000D00020017003E000200060007000800020016001F003E0002001200290037000300020012002D0002001500410020> Tj T*
+ET
+endstream
+endobj
+10 0 obj
+<<
+/Type /Page
+/MediaBox [ 0 0 612 792 ]
+/Resources <<
+/Font <<
+/F1 5 0 R
+>>
+>>
+/Contents 11 0 R
+/Parent 2 0 R
+>>
+endobj
+11 0 obj
+<<
+/Length 374
+>>
+stream
+BT
+/F1 12 Tf
+14 TL
+72 720 Td
+<0019003E00230002003400200038002900020021003A000D0002000A000500040005000500050004000500050005000400050005000500020034003F0023001E> Tj T*
+<0012003D0002002A002D0002002800300023000D0002002C0023001E00020015001E0029002B0039002300020019003200230002000E0023> Tj T*
+<0010001F0044001C0002001D001B0023001F000D000200110020002E002200020034003E001C> Tj T*
+ET
+endstream
+endobj
+xref
+0 12
+0000000000 65535 f 
+0000000015 00000 n 
+0000000054 00000 n 
+0000000120 00000 n 
+0000000169 00000 n 
+0000000297 00000 n 
+0000000433 00000 n 
+0000000615 00000 n 
+0000000787 00000 n 
+0000002113 00000 n 
+0000002759 00000 n 
+0000002889 00000 n 
+trailer
+<<
+/Size 12
+/Root 3 0 R
+/Info 1 0 R
+>>
+startxref
+3315
+%%EOF

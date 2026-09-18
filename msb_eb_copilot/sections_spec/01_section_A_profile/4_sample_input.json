@@ -1,0 +1,53 @@
+{
+  "ocr_from_documents": {
+    "company_name": "CÔNG TY CỔ PHẦN KINH DOANH KHÍ MIỀN NAM",
+    "company_short_name": "GAS SOUTH (PGS)",
+    "enterprise_type": "Công ty Cổ phần",
+    "headquarters_address": "Lầu 4, Tòa nhà PetroVietnam, số 1-5 Lê Duẩn, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
+    "tax_code_business_reg_no": "0304381832",
+    "business_reg_date": "28/03/2006, thay đổi lần thứ 16 ngày 15/08/2024",
+    "business_reg_place": "Sở Kế hoạch và Đầu tư TP. Hồ Chí Minh",
+    "operation_start_date": "28/03/2006",
+    "legal_representative_name": "Ông Nguyễn Ngọc Luận",
+    "legal_representative_title": "Tổng Giám đốc",
+    "group_affiliation": "Tập đoàn Dầu khí Quốc gia Việt Nam (PVN) / PV GAS",
+    "charter_capital_registered_vnd": 500000.0,
+    "latest_year_revenue_vnd": 6450000.0
+  },
+  "rm_provided_inputs": {
+    "cif_number": "1089562",
+    "customer_status": "KH mới",
+    "customer_segment": "LC",
+    "credit_applicant_representative": "Ông Nguyễn Ngọc Luận - Tổng Giám đốc",
+    "industry_level_5_code": "46611",
+    "industry_level_5_name": "Bán buôn khí dầu mỏ hóa lỏng (LPG) và khí thiên nhiên nén (CNG)",
+    "industry_revenue_share": "92.5%",
+    "main_business_activity": "Kinh doanh, chiết nạp và phân phối khí hóa lỏng LPG dân dụng & CNG công nghiệp",
+    "main_products": "Khí LPG bình dân dụng 12kg-45kg, Khí LPG bồn công nghiệp, Khí CNG đốt lò",
+    "actual_contributed_capital_vnd": 500000.0,
+    "contributed_capital_as_of_date": "31/12/2024",
+    "internal_rating_dvkd": {
+      "profile_id": "XHTD-2026-PGS-001",
+      "rating_grade": "A+",
+      "rating_score": 88.5
+    },
+    "approval_authority_matrix": {
+      "existing_approved_limit_total_vnd": 0.0,
+      "existing_approved_limit_unsecured_vnd": 0.0,
+      "proposed_limit_total_vnd": 1202375.0,
+      "proposed_limit_unsecured_vnd": 500000.0,
+      "target_approval_level": "HĐTDCC"
+    },
+    "latest_approval_session": "Chưa phát sinh (Hồ sơ cấp mới 2026)",
+    "credit_proposal_type": "Cấp mới"
+  },
+  "linked_from_section_e": {
+    "outstanding_loan_at_msb_vnd": 0.0,
+    "total_credit_exposure_at_msb_vnd": 0.0
+  },
+  "auto_default_flags": {
+    "restricted_credit_subject": "Không",
+    "environmental_social_risk_esg": "Không thuộc đối tượng",
+    "sbv_single_borrower_limit_check": "Trong giới hạn"
+  }
+}

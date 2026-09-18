@@ -1,0 +1,215 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MSB_EB_Section_B_Credit_Proposal_Input_Schema",
+  "description": "Schema đầu vào chuẩn cho PHẦN B: NỘI DUNG ĐỀ XUẤT CẤP TÍN DỤNG theo quy định MSB (Mục 1 & Mục 2.1 đến 2.8). Tuân thủ nguyên tắc 1 Business Fact = 1 Input = N Output Bindings.",
+  "type": "object",
+  "required": ["selected_needs", "facilities_data"],
+  "properties": {
+    "selected_needs": {
+      "type": "array",
+      "description": "Danh sách các nhu cầu tín dụng RM chọn (Multi-select 2.1 đến 2.8)",
+      "items": {
+        "type": "string",
+        "enum": [
+          "2.1_vay_vld_han_muc",
+          "2.2_vay_vld_han_muc_tren_12t",
+          "2.3_vay_ngan_han_tung_lan",
+          "2.4_vay_trung_dai_han",
+          "2.5_lc_nho_thu",
+          "2.6_bao_lanh",
+          "2.7_chiet_khau_bao_thanh_toan",
+          "2.8_rui_ro_doi_tac"
+        ]
+      },
+      "minItems": 1
+    },
+    "general_facility_summary": {
+      "type": "object",
+      "description": "Thông tin tổng hợp cấp tín dụng",
+      "properties": {
+        "currency": {
+          "type": "string",
+          "default": "VND",
+          "enum": ["VND", "USD", "EUR"]
+        },
+        "credit_proposal_type": {
+          "type": "string",
+          "description": "Hình thức đề xuất tổng thể",
+          "enum": ["Cấp mới", "Tái cấp", "Tái cấp tăng", "Điều chỉnh"]
+        }
+      }
+    },
+    "facilities_data": {
+      "type": "object",
+      "description": "Dữ liệu nghiệp vụ chi tiết cho từng nhu cầu (Chỉ nhập những nhu cầu có trong selected_needs)",
+      "properties": {
+        "need_2_1": {
+          "type": "object",
+          "description": "2.1 Cho vay VLĐ theo hạn mức (Mã ECS1101)",
+          "properties": {
+            "proposal_type": { "type": "string", "enum": ["Cấp mới", "Tái cấp"] },
+            "approved_limit_vnd": { "type": "number", "description": "Hạn mức đã được duyệt (triệu VND), để trống nếu Cấp mới" },
+            "proposed_limit_vnd": { "type": "number", "description": "Hạn mức đề xuất mới (triệu VND) - Single canonical fact" },
+            "note": { "type": "string", "description": "Ghi chú hạn mức" },
+            "purpose": { "type": "string", "description": "Mục đích vay" },
+            "duration_months": { "type": "integer", "description": "Thời hạn duy trì hạn mức (tháng)", "default": 12 },
+            "effective_date_rule": { "type": "string", "description": "Ngày hiệu lực của hạn mức", "enum": ["Kể từ ngày ký Hợp đồng tín dụng", "Kể từ ngày phê duyệt khoản vay", "Ngày cụ thể", "Khác"] },
+            "effective_date_custom": { "type": "string", "description": "Ngày cụ thể nếu chọn ngày cụ thể" },
+            "max_promissory_note_duration_months": { "type": "integer", "description": "Thời hạn tối đa mỗi khế ước nhận nợ (tháng)" },
+            "lending_interest_rate": { "type": "string", "description": "Lãi suất cho vay" },
+            "disbursement_method": { "type": "string", "description": "Hình thức giải ngân" },
+            "repayment_period": { "type": "string", "description": "Kỳ hạn trả nợ" },
+            "other_conditions": { "type": "string", "description": "Điều kiện khác (nếu có), để blank nếu không có" }
+          }
+        },
+        "need_2_2": {
+          "type": "object",
+          "description": "2.2 Cho vay VLĐ hạn mức trên 12 tháng (Mã ECS1101)",
+          "properties": {
+            "proposal_type": { "type": "string", "enum": ["Cấp mới", "Tái cấp"] },
+            "approved_limit_vnd": { "type": "number" },
+            "proposed_limit_vnd": { "type": "number" },
+            "note": { "type": "string" },
+            "purpose": { "type": "string" },
+            "facility_duration_months": { "type": "integer", "description": "Thời hạn hạn mức (tháng, phải > 12)" },
+            "effective_date_rule": { "type": "string" },
+            "max_promissory_note_duration_months": { "type": "integer" },
+            "lending_interest_rate": { "type": "string" },
+            "disbursement_method": { "type": "string" },
+            "repayment_period": { "type": "string" },
+            "other_conditions": { "type": "string" }
+          }
+        },
+        "need_2_3": {
+          "type": "object",
+          "description": "2.3 Vay ngắn hạn từng lần (Mã ECS1109)",
+          "properties": {
+            "proposal_type": { "type": "string", "enum": ["Cấp mới", "Tái cấp"] },
+            "approved_amount_vnd": { "type": "number" },
+            "proposed_amount_vnd": { "type": "number" },
+            "note": { "type": "string" },
+            "purpose": { "type": "string" },
+            "loan_duration_months": { "type": "integer" },
+            "effective_date_rule": { "type": "string" },
+            "lending_interest_rate": { "type": "string" },
+            "disbursement_method": { "type": "string" },
+            "repayment_period": { "type": "string" },
+            "other_conditions": { "type": "string" }
+          }
+        },
+        "need_2_4": {
+          "type": "object",
+          "description": "2.4 Vay trung/dài hạn (Mã ECS2100/ECS2400/ECS3100/ECS3400)",
+          "properties": {
+            "loan_type": { "type": "string", "enum": ["Trung hạn", "Dài hạn"] },
+            "proposal_type": { "type": "string", "enum": ["Cấp mới", "Tái cấp"] },
+            "approved_amount_vnd": { "type": "number" },
+            "proposed_amount_vnd": { "type": "number" },
+            "note": { "type": "string" },
+            "purpose": { "type": "string" },
+            "loan_duration_months": { "type": "integer" },
+            "grace_period_months": { "type": "integer", "description": "Thời gian ân hạn (tháng)" },
+            "drawdown_period_months": { "type": "integer", "description": "Thời hạn rút vốn (tháng)" },
+            "lending_interest_rate": { "type": "string" },
+            "disbursement_method": { "type": "string" },
+            "principal_repayment_schedule": { "type": "string", "description": "Kỳ hạn trả nợ GỐC" },
+            "interest_repayment_schedule": { "type": "string", "description": "Kỳ hạn trả nợ LÃI" },
+            "other_conditions": { "type": "string" }
+          }
+        },
+        "need_2_5": {
+          "type": "object",
+          "description": "2.5 Hạn mức/từng lần phát hành L/C/Nhờ thu (Mã ECS1308/1309/...)",
+          "properties": {
+            "issuance_structure": { "type": "string", "enum": ["Hạn mức", "Từng lần"] },
+            "product_type": { "type": "string", "enum": ["L/C", "Nhờ thu"] },
+            "term_classification": { "type": "string", "enum": ["Ngắn hạn", "Trung hạn", "Dài hạn"], "default": "Ngắn hạn" },
+            "proposal_type": { "type": "string", "enum": ["Cấp mới", "Tái cấp"] },
+            "approved_limit_vnd": { "type": "number" },
+            "proposed_limit_vnd": { "type": "number" },
+            "note": { "type": "string" },
+            "purpose": { "type": "string" },
+            "facility_duration_months": { "type": "integer" },
+            "effective_date_rule": { "type": "string" },
+            "lc_collection_type": { "type": "string", "description": "Loại L/C/Nhờ thu (Trả ngay/Trả chậm/UPAS...)" },
+            "min_margin_cash_percentage": { "type": "string", "description": "Tỷ lệ ký quỹ tối thiểu (%)" },
+            "financing_rate_per_lc_value": { "type": "string", "description": "Mức cho vay/Giá trị L/C" },
+            "lc_fee": { "type": "string", "description": "Phí L/C/Nhờ thu" },
+            "other_conditions": { "type": "string" }
+          }
+        },
+        "need_2_6": {
+          "type": "object",
+          "description": "2.6 Hạn mức/từng lần Bảo lãnh (Mã ECS1200/2200/3200)",
+          "properties": {
+            "issuance_structure": { "type": "string", "enum": ["Hạn mức", "Từng lần"] },
+            "term_classification": { "type": "string", "enum": ["Ngắn hạn", "Trung hạn", "Dài hạn"], "default": "Ngắn hạn" },
+            "proposal_type": { "type": "string", "enum": ["Cấp mới", "Tái cấp"] },
+            "approved_limit_vnd": { "type": "number" },
+            "proposed_limit_vnd": { "type": "number" },
+            "note": { "type": "string" },
+            "purpose": { "type": "string" },
+            "guarantee_types": { "type": "string", "description": "Loại bảo lãnh (Bảo lãnh dự thầu, thực hiện HĐ, tạm ứng, thanh toán, SBLC...)" },
+            "facility_duration_months": { "type": "integer" },
+            "effective_date_rule": { "type": "string" },
+            "single_guarantee_duration": { "type": "string", "description": "Thời hạn từng món BL" },
+            "min_margin_cash_percentage": { "type": "string", "description": "Tỷ lệ ký quỹ tối thiểu (%)" },
+            "other_conditions": { "type": "string" }
+          }
+        },
+        "need_2_7": {
+          "type": "object",
+          "description": "2.7 Hạn mức/từng lần chiết khấu BCT/Bao thanh toán (Mã ECS1102/...)",
+          "properties": {
+            "product_type": { "type": "string", "enum": ["Chiết khấu BCT", "Bao thanh toán"] },
+            "issuance_structure": { "type": "string", "enum": ["Hạn mức", "Từng lần"] },
+            "proposal_type": { "type": "string", "enum": ["Cấp mới", "Tái cấp"] },
+            "approved_limit_vnd": { "type": "number" },
+            "proposed_amount_vnd": { "type": "number", "description": "Số tiền" },
+            "proposed_discount_factoring_limit_vnd": { "type": "number", "description": "Hạn mức CK/BTT" },
+            "note": { "type": "string" },
+            "facility_duration_months": { "type": "integer" },
+            "effective_date_rule": { "type": "string" },
+            "discount_factoring_duration": { "type": "string" },
+            "financing_rate_per_export_doc_value": { "type": "string" },
+            "interest_rate": { "type": "string" },
+            "other_conditions": { "type": "string" }
+          }
+        },
+        "need_2_8": {
+          "type": "object",
+          "description": "2.8 Hạn mức rủi ro tín dụng đối tác (Mã ECS9000/9100/9200/9300)",
+          "properties": {
+            "proposal_type": { "type": "string", "enum": ["Cấp mới", "Tái cấp"] },
+            "approved_limit_vnd": { "type": "number" },
+            "proposed_limit_vnd": { "type": "number" },
+            "facility_duration_months": { "type": "integer" },
+            "effective_date_rule": { "type": "string" },
+            "note": { "type": "string" },
+            "selected_subproducts": {
+              "type": "array",
+              "items": { "type": "string", "enum": ["fx_derivatives", "interest_rate_derivatives_under_1y"] }
+            },
+            "fx_derivatives_details": {
+              "type": "object",
+              "properties": {
+                "limit_amount_vnd": { "type": "number" },
+                "max_tenor_per_deal": { "type": "string" },
+                "margin_cash": { "type": "string" }
+              }
+            },
+            "interest_rate_derivatives_details": {
+              "type": "object",
+              "properties": {
+                "limit_amount_vnd": { "type": "number" },
+                "max_tenor_per_deal": { "type": "string" },
+                "margin_cash": { "type": "string" }
+              }
+            },
+            "other_conditions": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

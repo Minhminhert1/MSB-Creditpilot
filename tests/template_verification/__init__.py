@@ -1,0 +1,1 @@
+"""Template verification test suite."""

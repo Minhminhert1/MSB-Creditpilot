@@ -1,0 +1,481 @@
+{
+  "accounting_governance": {
+    "mandatory_audit_by_law": "Có (Doanh nghiệp có vốn góp Nhà nước và thuộc phân khúc Khách hàng Doanh nghiệp lớn - Large Corporate)",
+    "audit_firm_name": "Công ty TNHH Hãng Kiểm toán A&C (Thành viên của Tập đoàn Kiểm toán Quốc tế Baker Tilly International)",
+    "audited_years": "2022, 2023, 2024 và Báo cáo tài chính soát xét bán niên 2025",
+    "audit_opinion": "Chấp thuận toàn phần (Ý kiến kiểm toán không có ngoại trừ, khẳng định BCTC phản ánh trung thực và hợp lý trên các khía cạnh trọng yếu tình hình tài chính và kết quả kinh doanh)",
+    "accounting_software": "Hệ thống Quản trị Doanh nghiệp tổng thể ERP - SAP S/4HANA tích hợp phân hệ kế toán kho vận và vật tư Bravo 8.0",
+    "finance_team_structure": "Ban Tài chính Kế toán gồm 14 nhân sự có trình độ chuyên môn cao (100% Cử nhân và Thạc sĩ chuyên ngành Tài chính - Ngân hàng, Kế toán - Kiểm toán), do Kế toán trưởng trực tiếp quản lý và báo cáo định kỳ cho Tổng giám đốc và Hội đồng Thành viên.",
+    "internal_financial_regulations": "Áp dụng nghiêm ngặt Quy chế Quản lý Tài chính theo Quyết định số 125/QĐ-VNS của Tổng công ty Thép Việt Nam - CTCP (VNSTEEL), tuân thủ đầy đủ Hệ thống Chuẩn mực Kế toán Việt Nam (VAS) và các Thông tư hướng dẫn của Bộ Tài chính."
+  },
+  "income_statement_3y": {
+    "years": [
+      "2022",
+      "2023",
+      "2024"
+    ],
+    "net_revenue": [
+      11790567.17,
+      8666343.8,
+      7469517.28
+    ],
+    "cogs": [
+      11450230.0,
+      8420705.28,
+      7302903.68
+    ],
+    "gross_profit": [
+      340337.17,
+      245638.51,
+      166613.6
+    ],
+    "gross_profit_margin_pct": [
+      2.89,
+      2.83,
+      2.23
+    ],
+    "financial_income": [
+      112178.04,
+      83646.16,
+      64285.5
+    ],
+    "financial_expenses": [
+      133918.28,
+      105616.15,
+      125066.62
+    ],
+    "interest_expenses": [
+      86585.09,
+      59616.3,
+      54424.04
+    ],
+    "sga_expenses": [
+      173011.16,
+      142303.35,
+      181434.34
+    ],
+    "net_profit_before_tax": [
+      152585.77,
+      81365.17,
+      -74601.86
+    ],
+    "net_profit_after_tax": [
+      143331.11,
+      61414.39,
+      13093.51
+    ],
+    "ebitda": [
+      435600.0,
+      312500.0,
+      268400.0
+    ]
+  },
+  "pnl_deep_dive_analysis": {
+    "revenue_analysis": "Năm 2024, Doanh thu thuần đạt 7.469,5 tỷ đồng (-13,8% yoy so với mức 8.666,3 tỷ đồng năm 2023 và 11.790,6 tỷ đồng năm 2022). Nguyên nhân chủ yếu do: (i) Về sản lượng tiêu thụ: Sản lượng thép xây dựng đạt 620.000 tấn thép thành phẩm (thép cuộn Ø6-Ø8 và thép thanh vằn D10-D40), giảm 8,5% so với năm 2023 do sự chững lại của thị trường bất động sản dân dụng nửa đầu năm 2024; (ii) Về đơn giá: Giá bán bình quân điều chỉnh giảm từ 13,9 triệu đồng/tấn xuống 12,04 triệu đồng/tấn do áp lực cạnh tranh gay gắt từ phôi thép nhập khẩu giá rẻ. Điểm sáng trong cơ cấu doanh thu là tỷ trọng tiêu thụ cho các dự án hạ tầng đầu tư công trọng điểm (Sân bay Quốc tế Long Thành, Cao tốc Biên Hòa - Vũng Tàu, Tuyến Metro Bến Thành - Suối Tiên) tăng mạnh từ 28% lên 42% tổng sản lượng qua các nhà thầu lớn như Tổng công ty Xây dựng Số 1 (CC1), Vinaconex và Đèo Cả, giúp dòng tiền thanh toán duy trì ổn định.",
+    "cogs_and_production_cost_analysis": "Giá vốn hàng bán năm 2024 ghi nhận 7.302,9 tỷ đồng, chiếm 97,77% doanh thu thuần. Phân tích bóc tách cơ cấu chi phí sản xuất tại Nhà máy Thép Miền Nam - Phú Mỹ cho thấy: (i) Chi phí Thép phế liệu và Kim loại bù (Scrap & HBI) chiếm 68,5% giá vốn; (ii) Chi phí Điện năng trả cho EVN SPC chiếm 14,2% giá vốn (khoảng 1.037 tỷ đồng/năm) do nhà máy vận hành lò hồ quang điện công suất lớn EAF 90 tấn/mẻ; (iii) Chi phí Than điện cực Graphite & Hợp kim Ferro chiếm 7,8%; (iv) Khấu hao và Nhân công trực tiếp chiếm 9,5%. Lợi thế chi phí tiền mặt (Cash Cost) của Thép Miền Nam vượt trội so với các đối thủ nhờ máy móc dây chuyền Danieli đã trích khấu hao 89,9% nguyên giá, giúp chi phí cố định/tấn sản phẩm ở mức rất thấp.",
+    "gross_margin_analysis": "Biên lợi nhuận gộp năm 2024 đạt 2,23%, thu hẹp so với 2,83% (2023) và 2,89% (2022). Nguyên nhân do độ trễ khoảng 30-45 ngày giữa giá thu mua nguyên liệu phôi thép/thép phế nhập khẩu và giá bán thép thành phẩm xuất xưởng khi thị trường điều chỉnh giảm nhanh trong Quý 2 và Quý 3/2024. Đơn vị đã chủ động tối ưu tồn kho an toàn từ 65 ngày xuống 50 ngày để hạn chế rủi ro giảm giá hàng tồn kho.",
+    "financial_income_and_expenses_analysis": "Doanh thu hoạt động tài chính năm 2024 đạt 64,3 tỷ đồng, chủ yếu đến từ lãi tiền gửi ngân hàng có kỳ hạn (1.300 tỷ đồng tiền gửi tại VCB, BIDV, VietinBank với lãi suất 4,5% - 5,8%/năm) và lãi chênh lệch tỷ giá. Chi phí tài chính là 125,1 tỷ đồng, trong đó chi phí lãi vay chiếm 54,4 tỷ đồng (giảm 8,7% so với năm 2023 nhờ đàm phán giảm lãi suất vay ngắn hạn xuống bình quân 4,8%/năm), còn lại 70,6 tỷ đồng là chi phí lỗ chênh lệch tỷ giá phát sinh từ các khoản mở L/C UPAS nhập khẩu nguyên liệu bằng USD khi tỷ giá USD/VND biến động trong năm 2024.",
+    "sga_expenses_analysis": "Chi phí Bán hàng và Quản lý Doanh nghiệp (SG&A) năm 2024 được kiểm soát chặt chẽ ở mức 181,4 tỷ đồng (chiếm 2,43% doanh thu thuần - thấp hơn mức trung bình ngành 3,2% - 4,5%). Trong đó: Chi phí vận chuyển đường thủy nội địa từ Cảng Quốc tế Thị Vải về các tổng kho miền Tây và miền Đông chiếm 48,2% (87,4 tỷ đồng); Chi phí nhân viên quản lý và bán hàng chiếm 30,5% (55,3 tỷ đồng); Chi phí khấu hao và dịch vụ mua ngoài chiếm 15,0% (27,3 tỷ đồng); Trích lập dự phòng nợ phải thu khó đòi chiếm 6,3% (11,4 tỷ đồng).",
+    "net_profit_and_dividends_analysis": "Lợi nhuận sau thuế năm 2024 đạt 13,1 tỷ đồng (năm 2023 đạt 61,4 tỷ đồng, năm 2022 đạt 143,3 tỷ đồng). Mặc dù chịu áp lực chu kỳ ngành thép toàn cầu đi xuống, Thép Miền Nam vẫn duy trì kết quả kinh doanh dương, không phát sinh lỗ lũy kế. Doanh nghiệp thực hiện trích lập Quỹ Đầu tư phát triển 30% và nộp phần lợi nhuận còn lại về Tổng công ty Thép Việt Nam - CTCP theo đúng quy định phân phối lợi nhuận của doanh nghiệp 100% vốn VNSTEEL."
+  },
+  "balance_sheet_3y": {
+    "total_assets": [
+      2768136.81,
+      3218071.16,
+      3648052.89
+    ],
+    "current_assets": [
+      2394001.64,
+      2826925.26,
+      3238286.43
+    ],
+    "cash_and_equivalents": [
+      0.0,
+      270288.35,
+      76778.34
+    ],
+    "short_term_investments": [
+      979000.0,
+      695000.0,
+      1300000.0
+    ],
+    "accounts_receivable": [
+      10163.66,
+      394896.57,
+      556382.9
+    ],
+    "inventories": [
+      1178593.44,
+      1003712.26,
+      956107.97
+    ],
+    "other_current_assets": [
+      226244.54,
+      463028.08,
+      349017.22
+    ],
+    "non_current_assets": [
+      374135.17,
+      391145.9,
+      409766.46
+    ],
+    "fixed_assets_net": [
+      263944.9,
+      291365.31,
+      330225.12
+    ],
+    "fixed_assets_cost": [
+      3215700.0,
+      3215700.0,
+      3215700.0
+    ],
+    "fixed_assets_depreciation": [
+      2951755.1,
+      2924334.69,
+      2885474.88
+    ],
+    "total_liabilities": [
+      1691741.0,
+      2141675.35,
+      2571657.08
+    ],
+    "current_liabilities": [
+      1690716.0,
+      2140650.35,
+      2570632.08
+    ],
+    "accounts_payable": [
+      380500.0,
+      405200.0,
+      412078.51
+    ],
+    "advances_from_customers": [
+      24500.0,
+      22100.0,
+      18500.0
+    ],
+    "short_term_debt": [
+      1285000.0,
+      1509000.0,
+      1876786.98
+    ],
+    "long_term_debt": [
+      1025.0,
+      1025.0,
+      1025.0
+    ],
+    "owners_equity": [
+      1076395.81,
+      1076395.81,
+      1076395.81
+    ],
+    "charter_capital_paid": [
+      1000000.0,
+      1000000.0,
+      1000000.0
+    ],
+    "undistributed_earnings": [
+      76395.81,
+      76395.81,
+      76395.81
+    ]
+  },
+  "cash_flow_statement_3y": {
+    "years": [
+      "2022",
+      "2023",
+      "2024"
+    ],
+    "ocf_cash_from_operations": [
+      215400.0,
+      184500.0,
+      142800.0
+    ],
+    "icf_cash_from_investing": [
+      -180000.0,
+      -125000.0,
+      -210000.0
+    ],
+    "fcf_cash_from_financing": [
+      -32000.0,
+      -45000.0,
+      75000.0
+    ],
+    "net_cash_flow": [
+      3400.0,
+      14500.0,
+      7800.0
+    ],
+    "cash_beginning": [
+      73378.34,
+      76778.34,
+      91278.34
+    ],
+    "cash_ending": [
+      76778.34,
+      91278.34,
+      99078.34
+    ],
+    "cash_flow_analysis": "Dòng tiền thuần từ Hoạt động Kinh doanh (OCF) của Doanh nghiệp liên tục dương và ổn định qua cả 3 năm (năm 2022 đạt +215,4 tỷ, năm 2023 đạt +184,5 tỷ, năm 2024 đạt +142,8 tỷ đồng). Điều này chứng minh chất lượng lợi nhuận cao, khả năng tạo tiền mặt tự thân vững chắc từ hoạt động sản xuất kinh doanh cốt lõi mà không bị đọng vốn quá mức. Dòng tiền từ Hoạt động Đầu tư (ICF) ghi nhận âm phản ánh chính sách tiếp tục gửi tiền có kỳ hạn sinh lời và chi trả bảo dưỡng lớn định kỳ dây chuyền thiết bị nhà máy. Dòng tiền từ Hoạt động Tài chính (FCF) biến động phù hợp với chu kỳ giải ngân - thu nợ vốn lưu động tại các NHTM và nghĩa vụ nộp lợi nhuận về VNSTEEL."
+  },
+  "sub_tables_deep_dive": {
+    "receivables_breakdown": [
+      {
+        "stt": 1,
+        "customer_name": "Công ty Cổ phần Thương mại Thép Nam Kim",
+        "balance_vnd": 185400.0,
+        "share_pct": "33.3%",
+        "terms": "Gối đầu 30 ngày, bảo lãnh ngân hàng",
+        "status": "Trong hạn (<30 ngày), luân chuyển đều",
+        "provision_vnd": 0
+      },
+      {
+        "stt": 2,
+        "customer_name": "Công ty TNHH MTV Thép SMC",
+        "balance_vnd": 142600.0,
+        "share_pct": "25.6%",
+        "terms": "Bảo lãnh thanh toán qua VCB",
+        "status": "Trong hạn (<30 ngày), quan hệ >15 năm",
+        "provision_vnd": 0
+      },
+      {
+        "stt": 3,
+        "customer_name": "Tổng công ty Xây dựng Số 1 - CTCP (CC1)",
+        "balance_vnd": 98500.0,
+        "share_pct": "17.7%",
+        "terms": "Thanh toán theo tiến độ nghiệm thu dự án",
+        "status": "Trong hạn (<45 ngày), dự án Sân bay Long Thành",
+        "provision_vnd": 0
+      },
+      {
+        "stt": 4,
+        "customer_name": "Các khách hàng đại lý phân phối cấp 1 khác",
+        "balance_vnd": 129882.9,
+        "share_pct": "23.4%",
+        "terms": "Ký cược / Thế chấp BĐS / Trả trước",
+        "status": "Trong hạn; Đã trích lập dự phòng 11,4 tỷ đồng",
+        "provision_vnd": 11389.3
+      }
+    ],
+    "inventory_breakdown": [
+      {
+        "stt": 1,
+        "item_category": "Nguyên vật liệu chính (Phôi thép vuông, Thép phế liệu EAF, Than điện cực)",
+        "value_vnd": 458600.0,
+        "share_pct": "48.0%",
+        "rotation_days": 24.1,
+        "market_risk": "Thấp - Phôi thép luân chuyển liên tục cho xưởng cán"
+      },
+      {
+        "stt": 2,
+        "item_category": "Thành phẩm (Thép thanh vằn chữ 'V' Ø10-D40 và Thép cuộn Ø6-Ø8)",
+        "value_vnd": 382500.0,
+        "share_pct": "40.0%",
+        "rotation_days": 20.0,
+        "market_risk": "Thấp - Tiêu thụ nhanh theo hợp đồng bao tiêu"
+      },
+      {
+        "stt": 3,
+        "item_category": "Chi phí sản xuất kinh doanh dở dang (Phôi nóng trên sàn chuyển)",
+        "value_vnd": 68400.0,
+        "share_pct": "7.1%",
+        "rotation_days": 3.6,
+        "market_risk": "Không rủi ro - Luân chuyển ngay trong ca sản xuất"
+      },
+      {
+        "stt": 4,
+        "item_category": "Công cụ dụng cụ, Vật tư phụ tùng thay thế và Vật liệu chịu lửa lò nung",
+        "value_vnd": 46608.0,
+        "share_pct": "4.9%",
+        "rotation_days": 2.5,
+        "market_risk": "Thấp - Phục vụ bảo trì định kỳ thiết bị Danieli"
+      }
+    ],
+    "payables_breakdown": [
+      {
+        "stt": 1,
+        "supplier_name": "Mitsui & Co., Ltd / Marubeni Corporation (Nhật Bản)",
+        "balance_vnd": 182400.0,
+        "share_pct": "44.3%",
+        "product": "Thép phế liệu chất lượng cao HMS1 & Phôi thép",
+        "payment_terms": "L/C UPAS 90 ngày tại Vietcombank"
+      },
+      {
+        "stt": 2,
+        "supplier_name": "Tổng công ty Điện lực Miền Nam (EVN SPC)",
+        "balance_vnd": 86500.0,
+        "share_pct": "21.0%",
+        "product": "Điện năng trung và cao thế cho trạm biến áp 110kV",
+        "payment_terms": "Thanh toán định kỳ theo hóa đơn EVN ngày 15 hàng tháng"
+      },
+      {
+        "stt": 3,
+        "supplier_name": "Công ty Cổ phần Kim loại màu Thái Nguyên",
+        "balance_vnd": 45200.0,
+        "share_pct": "11.0%",
+        "product": "Hợp kim Ferro Silicon, Ferro Mangan luyện thép",
+        "payment_terms": "Gối đầu công nợ 30 ngày chuyển khoản"
+      },
+      {
+        "stt": 4,
+        "supplier_name": "Các nhà cung cấp vật tư phụ tùng và dịch vụ logistics khác",
+        "balance_vnd": 97978.5,
+        "share_pct": "23.7%",
+        "product": "Vật liệu chịu lửa, dầu bôi trơn công nghiệp, cước tàu thủy",
+        "payment_terms": "Tín chấp / Thanh toán chuyển khoản 15 - 30 ngày"
+      }
+    ],
+    "bank_debt_breakdown": [
+      {
+        "stt": 1,
+        "bank_name": "Ngân hàng TMCP Ngoại thương Việt Nam (Vietcombank - CN Vũng Tàu)",
+        "credit_limit_vnd": 1200000.0,
+        "outstanding_loan_vnd": 850000.0,
+        "lc_limit_vnd": 800000.0,
+        "interest_rate": "4.8% - 5.2%/năm",
+        "collateral": "Thế chấp Tiền gửi có kỳ hạn 600 tỷ + Kho thành phẩm"
+      },
+      {
+        "stt": 2,
+        "bank_name": "Ngân hàng TMCP Đầu tư và Phát triển Việt Nam (BIDV - CN Bà Rịa)",
+        "credit_limit_vnd": 1000000.0,
+        "outstanding_loan_vnd": 626787.0,
+        "lc_limit_vnd": 500000.0,
+        "interest_rate": "5.0% - 5.4%/năm",
+        "collateral": "Thế chấp Tiền gửi có kỳ hạn 400 tỷ + Quyền đòi nợ"
+      },
+      {
+        "stt": 3,
+        "bank_name": "Ngân hàng TMCP Công thương Việt Nam (VietinBank - CN TP.HCM)",
+        "credit_limit_vnd": 600000.0,
+        "outstanding_loan_vnd": 400000.0,
+        "lc_limit_vnd": 300000.0,
+        "interest_rate": "5.1% - 5.5%/năm",
+        "collateral": "Thế chấp Tiền gửi 300 tỷ + Tín chấp một phần theo hạn mức VNSTEEL"
+      },
+      {
+        "stt": 4,
+        "bank_name": "Ngân hàng TMCP Hàng Hải Việt Nam (MSB - Khối KHDN Lớn)",
+        "credit_limit_vnd": 0.0,
+        "outstanding_loan_vnd": 0.0,
+        "lc_limit_vnd": 0.0,
+        "interest_rate": "Dự kiến 5.0%/năm (Vay) / 0.15% (L/C)",
+        "collateral": "Đề xuất cấp mới: HMTD 1.500 tỷ (Vay 800 tỷ, L/C 500 tỷ, BL 200 tỷ)"
+      }
+    ]
+  },
+  "financial_ratios_3y": {
+    "current_ratio": [
+      1.42,
+      1.32,
+      1.26
+    ],
+    "quick_ratio": [
+      0.72,
+      0.85,
+      0.89
+    ],
+    "cash_ratio": [
+      0.58,
+      0.45,
+      0.54
+    ],
+    "debt_to_equity": [
+      1.57,
+      1.99,
+      2.39
+    ],
+    "total_debt_to_equity": [
+      1.19,
+      1.4,
+      1.74
+    ],
+    "dscr_icr": [
+      3.63,
+      1.85,
+      3.08
+    ],
+    "ros": [
+      1.22,
+      0.71,
+      0.18
+    ],
+    "roe": [
+      13.32,
+      5.71,
+      1.22
+    ],
+    "roa": [
+      5.18,
+      1.91,
+      0.36
+    ]
+  },
+  "working_capital_turnover": {
+    "dso_days": 18.5,
+    "dio_days": 50.2,
+    "dpo_days": 23.0,
+    "cash_conversion_cycle_days": 45.7,
+    "working_capital_turnover_annual": 2.46
+  },
+  "mb09_credit_demand_calculation": {
+    "target_revenue_vnd": 7585861.58,
+    "target_operating_expenses_vnd": 7429674.33,
+    "working_capital_demand_per_cycle_vnd": 3016429.7,
+    "own_working_capital_nwc_vnd": 710826.73,
+    "other_mobilized_capital_vnd": 0.0,
+    "total_credit_demand_all_banks_vnd": 2305602.97,
+    "msb_proposed_facility_limit_vnd": 1500000.0,
+    "msb_financing_share_percentage": "65.1%"
+  },
+  "basel_ii_rorwa_simulation": {
+    "total_operating_income_toi_vnd": 43500.0,
+    "net_interest_income_nii_vnd": 36000.0,
+    "non_interest_income_fee_vnd": 7500.0,
+    "risk_weighted_assets_rwa_vnd": 1200000.0,
+    "expected_loss_el_vnd": 4500.0,
+    "operating_cost_opex_vnd": 4800.0,
+    "rorwa_percentage": 2.85,
+    "torwa_vnd": 34200.0,
+    "hurdle_rate_met": true
+  },
+  "sensitivity_analysis": [
+    {
+      "scenario_name": "Kịch bản 1: Giá nguyên liệu thép phôi/phế tăng +10%",
+      "impact_description": "Giá vốn hàng bán tăng thêm ~500 tỷ đồng. Nếu không chuyển tiếp được toàn bộ vào giá bán, biên lãi gộp giảm từ 2.23% về ~1.50%. Nhu cầu vốn lưu động 1 chu kỳ tăng thêm 210 tỷ đồng.",
+      "mitigant": "Doanh nghiệp chủ động ký hợp đồng nhập khẩu phôi kỳ hạn cố định giá (fixed price) 60-90 ngày với Mitsui/Marubeni và duy trì tỷ lệ phôi thép tự luyện từ lò EAF ở mức 65% để chủ động giá thành."
+    },
+    {
+      "scenario_name": "Kịch bản 2: Lãi suất cho vay VND tăng +150 bps (+1.5%/năm)",
+      "impact_description": "Chi phí lãi vay tăng thêm khoảng 28,1 tỷ đồng/năm. Hệ số chi trả lãi vay ICR giảm từ 3.08 lần xuống 2.15 lần nhưng vẫn ở trên ngưỡng an toàn (>1.5 lần).",
+      "mitigant": "Doanh nghiệp tận dụng nguồn tiền gửi 1.300 tỷ đồng hưởng lãi suất huy động tăng tương ứng để bù đắp chi phí lãi vay (lãi tiền gửi tạo ra 64 - 75 tỷ đồng doanh thu tài chính/năm)."
+    },
+    {
+      "scenario_name": "Kịch bản 3: Tỷ giá USD/VND biến động tăng +3.0%",
+      "impact_description": "Chi phí thanh toán L/C UPAS nhập khẩu nguyên liệu tăng thêm khoảng 18 - 25 tỷ đồng lỗ chênh lệch tỷ giá.",
+      "mitigant": "Đơn vị sử dụng công cụ phái sinh Forward/FX Swap do MSB cung cấp trong gói hạn mức để khóa tỷ giá kỳ hạn tại thời điểm mở L/C, phòng ngừa triệt để rủi ro tỷ giá."
+    }
+  ],
+  "post_lending_covenants": [
+    {
+      "stt": 1,
+      "covenant_title": "Cam kết Dòng tiền qua tài khoản MSB",
+      "requirement": "Tối thiểu 65% tổng doanh thu thanh toán qua tài khoản của Công ty mở tại MSB, tương ứng tối thiểu 4.800 tỷ đồng/năm. Số dư tiền gửi không kỳ hạn bình quân (CASA) duy trì tối thiểu 50 tỷ đồng."
+    },
+    {
+      "stt": 2,
+      "covenant_title": "Duy trì Tỷ lệ Tiền gửi Bảo đảm & Ký quỹ L/C",
+      "requirement": "Duy trì số dư tiền gửi có kỳ hạn tại MSB tối thiểu 300 - 500 tỷ đồng để làm tài sản bảo đảm cho các khế ước vay ngắn hạn và mở L/C UPAS."
+    },
+    {
+      "stt": 3,
+      "covenant_title": "Chế độ Báo cáo & Giám sát Định kỳ",
+      "requirement": "Cung cấp Báo cáo tài chính quý (trong vòng 30 ngày sau kết thúc quý), BCTC kiểm toán năm (trong vòng 90 ngày sau kết thúc năm tài chính), Bảng kê công nợ và tồn kho hàng tháng, Danh sách hợp đồng đầu ra/đầu vào có giá trị từ 50 tỷ đồng trở lên."
+    },
+    {
+      "stt": 4,
+      "covenant_title": "Kiểm soát Mục đích Sử dụng Vốn",
+      "requirement": "MSB kiểm soát chứng từ giải ngân vốn lưu động nghiêm ngặt theo đúng Hợp đồng mua bán nguyên liệu/vật tư, Hóa đơn GTGT hợp lệ, Biên bản giao nhận hàng hóa tại Nhà máy Phú Mỹ hoặc Cảng Thị Vải; chuyển khoản trực tiếp cho bên thụ hưởng."
+    }
+  ]
+}

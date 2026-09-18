@@ -1,0 +1,60 @@
+{
+  "selected_needs": [
+    "2.1_vay_vld_han_muc",
+    "2.5_lc_nho_thu",
+    "2.6_bao_lanh"
+  ],
+  "general_facility_summary": {
+    "currency": "VND",
+    "credit_proposal_type": "Cấp mới"
+  },
+  "facilities_data": {
+    "need_2_1": {
+      "proposal_type": "Cấp mới",
+      "approved_limit_vnd": null,
+      "proposed_limit_vnd": 800000.0,
+      "note": "Cấp mới năm 2026",
+      "purpose": "Bổ sung vốn lưu động phục vụ hoạt động sản xuất kinh doanh phôi thép và thép xây dựng",
+      "duration_months": 12,
+      "effective_date_rule": "Kể từ ngày ký Hợp đồng tín dụng",
+      "effective_date_custom": "",
+      "max_promissory_note_duration_months": 4,
+      "lending_interest_rate": "Theo quy định MSB tại thời điểm giải ngân từng KƯNN",
+      "disbursement_method": "Chuyển khoản trực tiếp vào tài khoản bên thụ hưởng (NCC nguyên vật liệu, phôi thép, điện lực)",
+      "repayment_period": "Gốc trả cuối kỳ mỗi KƯNN; Lãi trả định kỳ hàng tháng",
+      "other_conditions": ""
+    },
+    "need_2_5": {
+      "issuance_structure": "Hạn mức",
+      "product_type": "L/C",
+      "term_classification": "Ngắn hạn",
+      "proposal_type": "Cấp mới",
+      "approved_limit_vnd": null,
+      "proposed_limit_vnd": 500000.0,
+      "note": "Cấp mới",
+      "purpose": "Phát hành thư tín dụng L/C nhập khẩu phôi thép, phế liệu thép và phụ liệu sản xuất",
+      "facility_duration_months": 12,
+      "effective_date_rule": "Kể từ ngày ký Hợp đồng tín dụng",
+      "lc_collection_type": "L/C trả ngay (Sight LC) hoặc L/C trả chậm UPAS tối đa 03 tháng",
+      "min_margin_cash_percentage": "0%",
+      "financing_rate_per_lc_value": "100%",
+      "lc_fee": "Theo biểu phí chuẩn của MSB tại thời điểm phát hành",
+      "other_conditions": "L/C không ký hậu"
+    },
+    "need_2_6": {
+      "issuance_structure": "Hạn mức",
+      "term_classification": "Ngắn hạn",
+      "proposal_type": "Cấp mới",
+      "approved_limit_vnd": null,
+      "proposed_limit_vnd": 200000.0,
+      "note": "Cấp mới",
+      "purpose": "Phát hành bảo lãnh thực hiện hợp đồng, bảo lãnh thanh toán tiền điện cho EVN và hợp đồng mua bán thép",
+      "guarantee_types": "Bảo lãnh thực hiện hợp đồng, Bảo lãnh thanh toán",
+      "facility_duration_months": 12,
+      "effective_date_rule": "Kể từ ngày ký Hợp đồng tín dụng",
+      "single_guarantee_duration": "Tối đa 12 tháng kể từ ngày phát hành",
+      "min_margin_cash_percentage": "0%",
+      "other_conditions": ""
+    }
+  }
+}

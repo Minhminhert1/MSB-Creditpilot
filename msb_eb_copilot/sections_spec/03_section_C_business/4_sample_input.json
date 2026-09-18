@@ -1,0 +1,168 @@
+{
+  "company_history": {
+    "founding_year": 2014,
+    "history_narrative": "Công ty TNHH MTV Thép Miền Nam - VNSTEEL tiền thân là Nhà máy Thép Phú Mỹ trực thuộc Tổng công ty Thép Việt Nam - CTCP (VNSTEEL), được chính thức chuyển đổi mô hình hoạt động sang Công ty TNHH Một thành viên theo Quyết định số 125/QĐ-VNS của Hội đồng quản trị VNSTEEL từ năm 2014. Doanh nghiệp sở hữu dây chuyền luyện cán thép công nghệ hiện đại hàng đầu khu vực phía Nam với bề dày hoạt động hơn 10 năm trong ngành công nghiệp luyện kim.",
+    "capital_increase_milestones": [
+      {
+        "effective_date": "10/12/2014",
+        "charter_capital_vnd": 1000000.0,
+        "event_description": "Thành lập theo mô hình Công ty TNHH MTV do VNSTEEL nắm 100% vốn"
+      },
+      {
+        "effective_date": "11/07/2025",
+        "charter_capital_vnd": 1000000.0,
+        "event_description": "Thay đổi Giấy chứng nhận ĐKKD lần thứ 8, giữ nguyên vốn điều lệ thực góp 1.000 tỷ VND"
+      }
+    ],
+    "stock_listing_info": {
+      "is_listed": false,
+      "stock_ticker": "",
+      "exchange": "Chưa niêm yết (Công ty mẹ VNSTEEL niêm yết trên UPCoM: TVN)",
+      "recent_price_range": "",
+      "dividend_policy": ""
+    }
+  },
+  "ownership_and_governance": {
+    "parent_company_name": "TỔNG CÔNG TY THÉP VIỆT NAM - CTCP (VNSTEEL)",
+    "parent_company_ownership_ratio": "100%",
+    "major_shareholders": [
+      {
+        "shareholder_name": "TỔNG CÔNG TY THÉP VIỆT NAM - CTCP",
+        "id_tax_code": "0100100047",
+        "ownership_percentage": "100%",
+        "contributed_capital_vnd": 1000000.0,
+        "role_description": "Chủ sở hữu duy nhất, trực tiếp quản lý và phê duyệt các chiến lược lớn"
+      }
+    ],
+    "subsidiaries_and_affiliates": [
+      {
+        "company_name": "Công ty TNHH MTV Thép Tấm lá Phú Mỹ - VNSTEEL",
+        "relationship_type": "Đơn vị thành viên",
+        "ownership_ratio": "Cùng công ty mẹ VNSTEEL",
+        "main_business": "Sản xuất tôn mạ, thép lá cán nguội"
+      },
+      {
+        "company_name": "Công ty Cổ phần Thép VICASA - VNSTEEL",
+        "relationship_type": "Công ty liên kết",
+        "ownership_ratio": "Thành viên hệ thống VNSTEEL",
+        "main_business": "Luyện cán thép xây dựng"
+      }
+    ],
+    "blacklist_and_restricted_status": "Không thuộc danh sách Blacklist, không vi phạm Điều 126 Luật TCTD"
+  },
+  "management_team": {
+    "board_of_members_or_directors": [
+      {
+        "full_name": "Nguyễn Đình Phúc",
+        "title": "Chủ tịch HĐTV",
+        "qualification": "Thạc sĩ Quản trị Kinh doanh / Kỹ sư Luyện kim",
+        "industry_experience_years": 25
+      },
+      {
+        "full_name": "Lê Việt",
+        "title": "Thành viên HĐTV kiêm Tổng Giám đốc",
+        "qualification": "Kỹ sư Cơ khí / Cử nhân Kinh tế",
+        "industry_experience_years": 22
+      }
+    ],
+    "executive_board": {
+      "general_director_name": "Lê Việt",
+      "general_director_profile": "Tổng Giám đốc trực tiếp điều hành toàn bộ hoạt động sản xuất, kinh doanh và ký kết hợp đồng thương mại theo phân quyền của Điều lệ công ty.",
+      "chief_accountant_name": "Trần Thị Thu Hà",
+      "chief_accountant_profile": "Kế toán trưởng với hơn 15 năm kinh nghiệm quản trị tài chính tại các đơn vị thành viên của Tổng công ty Thép Việt Nam."
+    },
+    "headcount_and_departments": {
+      "total_employees": 650,
+      "organizational_structure_summary": "Bộ máy gồm 8 phòng ban chức năng (Kế hoạch - Thị trường, Tài chính - Kế toán, Tổ chức - Nhân sự, Kỹ thuật - An toàn, Vật tư - Thiết bị, Quản lý Chất lượng) và 2 phân xưởng sản xuất chính (Phân xưởng Luyện thép EAF, Phân xưởng Cán thép)."
+    }
+  },
+  "business_model_and_products": {
+    "core_business_model": "Sản xuất và thương mại thép xây dựng khép kín từ phôi thép (luyện thép bằng lò hồ quang điện tử EAF kết hợp lò tinh luyện LF) đến cán nóng thành phẩm thép cuộn và thép thanh vằn.",
+    "main_products_portfolio": [
+      {
+        "product_name": "Thép thanh vằn (D10 - D40 mác CB300-V, CB400-V, CB500-V, Gr60)",
+        "brand_name": "Thép Miền Nam 'V'",
+        "revenue_contribution_percentage": "65%",
+        "quality_standards": "TCVN 1651-2:2018, JIS G3112, ASTM A615/A615M (Thương hiệu Quốc gia)"
+      },
+      {
+        "product_name": "Thép cuộn (Phi 6, Phi 8, Phi 10)",
+        "brand_name": "Thép Miền Nam 'V'",
+        "revenue_contribution_percentage": "30%",
+        "quality_standards": "TCVN 1651-1:2018, JIS G3505"
+      },
+      {
+        "product_name": "Phôi thép vuông (Billet 130x130, 150x150)",
+        "brand_name": "SSCV Billet",
+        "revenue_contribution_percentage": "5%",
+        "quality_standards": "JIS G3112, TCVN"
+      }
+    ],
+    "production_technology_and_capacity": {
+      "factory_locations": "Khu công nghiệp Phú Mỹ 1, Phường Phú Mỹ, Thị xã Phú Mỹ, Tỉnh Bà Rịa - Vũng Tàu",
+      "technology_description": "Dây chuyền luyện cán thép đồng bộ do Tập đoàn Danieli (Italy) cung cấp, áp dụng công nghệ lò nung đáy dầm đi dạo liên tục, máy cán tốc độ cao giảm thiểu tối đa hao hụt kim loại và tiết kiệm điện năng.",
+      "designed_capacity_annual": "Luyện phôi thép: 1.000.000 tấn/năm; Cán thép xây dựng: 1.000.000 tấn/năm",
+      "actual_utilization_rate": "85% - 90% công suất thiết kế"
+    }
+  },
+  "inbound_supply_chain": {
+    "raw_materials_overview": "Nguyên vật liệu chính gồm Thép phế liệu (Scrap nhập khẩu và nội địa), Phôi thép nhập khẩu, Hợp kim (Ferro Silicon, Ferro Manganese), Than điện cực Graphite, Điện năng và Khí oxy kỹ thuật.",
+    "pricing_mechanism": "Giá mua thép phế và phôi thép biến động theo giá thị trường châu Á (dao động 450 - 480 USD/tấn tham chiếu Platts/SBB) và tỷ giá USD/VND. Hợp đồng nhập khẩu ký kết theo điều kiện CFR/CIF cảng Phú Mỹ với thời hạn thanh toán bằng L/C UPAS 90-180 ngày nhằm tối ưu chi phí tài chính.",
+    "top_suppliers": [
+      {
+        "supplier_name": "Mitsui & Co., Ltd / Marubeni Corporation (Nhật Bản)",
+        "supplied_goods": "Thép phế cao cấp HMS 1/2 và phôi thép nguyên sinh",
+        "annual_purchase_value_vnd": 2450000.0,
+        "purchase_share_percentage": "35%",
+        "payment_terms": "L/C trả chậm UPAS 90 ngày"
+      },
+      {
+        "supplier_name": "Tổng công ty Điện lực Miền Nam (EVN SPC) - Công ty Điện lực BR-VT",
+        "supplied_goods": "Điện năng phục vụ sản xuất lò luyện EAF",
+        "annual_purchase_value_vnd": 850000.0,
+        "purchase_share_percentage": "12%",
+        "payment_terms": "Thanh toán theo hóa đơn tháng, có bảo lãnh thanh toán ngân hàng"
+      },
+      {
+        "supplier_name": "Công ty Cổ phần Kim loại màu Thái Nguyên",
+        "supplied_goods": "Hợp kim Ferro các loại (FeSi, FeMn)",
+        "annual_purchase_value_vnd": 320000.0,
+        "purchase_share_percentage": "5%",
+        "payment_terms": "Chuyển khoản thanh toán trong vòng 30 ngày"
+      }
+    ]
+  },
+  "outbound_distribution": {
+    "distribution_channels": "Hệ thống hơn 80 Tổng đại lý cấp 1 và mạng lưới phân phối trải dài khắp các tỉnh thành Nam Bộ, Miền Trung và Tây Nguyên; cung ứng trực tiếp cho các dự án hạ tầng trọng điểm quốc gia (Sân bay Long Thành, Cao tốc Bắc - Nam, Vành đai 3 TPHCM).",
+    "market_share_and_competitors": {
+      "market_share_estimate": "Chiếm 19,3% thị phần thép xây dựng tại khu vực phía Nam (Tăng trưởng sản lượng tiêu thụ +37,6% yoy nhờ giải ngân đầu tư công)",
+      "top_competitors": [
+        "Tập đoàn Hòa Phát (HPG)",
+        "Công ty Cổ phần Thép Pomina (POM)",
+        "Công ty TNHH Thép Vina Kyoei"
+      ],
+      "competitive_advantages": "Thương hiệu Thép chữ 'V' là Thương hiệu Quốc gia có uy tín lịch sử lâu đời, vị trí nhà máy sát cụm cảng nước sâu Cái Mép - Thị Vải tối ưu chi phí vận chuyển. Đặc biệt được bảo vệ bởi chính sách phòng vệ thương mại của Bộ Công Thương (Quyết định 1917/QĐ-BCT chống lẩn tránh thép giá rẻ từ Trung Quốc)."
+    },
+    "top_customers": [
+      {
+        "customer_name": "Công ty Cổ phần Thương mại Thép Nam Kim",
+        "product_purchased": "Thép thanh vằn và thép cuộn",
+        "revenue_share_percentage": "15%",
+        "credit_terms": "Bảo lãnh ngân hàng gối đầu 30 ngày"
+      },
+      {
+        "customer_name": "Công ty TNHH MTV Thép SMC",
+        "product_purchased": "Thép cuộn xây dựng",
+        "revenue_share_percentage": "12%",
+        "credit_terms": "Thanh toán trong vòng 15-30 ngày sau khi giao hàng"
+      },
+      {
+        "customer_name": "Tổng công ty Xây dựng Số 1 - CTCP (CC1)",
+        "product_purchased": "Thép thanh vằn mác cao cho dự án hạ tầng",
+        "revenue_share_percentage": "10%",
+        "credit_terms": "Thanh toán theo tiến độ nghiệm thu từng đợt"
+      }
+    ],
+    "receivables_and_credit_policy": "Áp dụng chính sách bán hàng yêu cầu bảo lãnh thanh toán ngân hàng hoặc ký quỹ đối với đại lý cấp 1; thời hạn công nợ tối đa 30-45 ngày, định kỳ hàng tuần theo dõi hạn mức công nợ để dừng xuất hàng nếu phát sinh nợ quá hạn."
+  }
+}
