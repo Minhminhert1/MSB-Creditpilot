@@ -14,6 +14,7 @@ Bảo đảm:
 """
 
 import os
+import threading
 from typing import Dict, List
 import pytest
 import pypdf
@@ -41,9 +42,11 @@ class RecordingOCREngine(BaseOCREngine):
         self.responses = responses or {}
         self.fail_pages = fail_pages or {}
         self.recorded_pages: List[int] = []
+        self._lock = threading.Lock()
 
     def ocr_page(self, base64_png: str, page_num: int) -> str:
-        self.recorded_pages.append(page_num)
+        with self._lock:
+            self.recorded_pages.append(page_num)
         if page_num in self.fail_pages:
             raise self.fail_pages[page_num]
         return self.responses.get(page_num, f"Nội dung nhận dạng OCR trang {page_num}")
@@ -106,7 +109,7 @@ def test_all_scanned_three_pages(tmp_path, scanned_page_obj):
     assert result.provider == "recording_engine"
     assert result.fallback_reason == "PDFBlankPageError"
     assert result.page_count == 3
-    assert engine.recorded_pages == [1, 2, 3]
+    assert sorted(engine.recorded_pages) == [1, 2, 3]
 
     assert result.tagged_text.startswith("[PAGE 1]\nNội dung nhận dạng OCR trang 1")
     assert "\n\n[PAGE 2]\nNội dung nhận dạng OCR trang 2" in result.tagged_text
@@ -133,7 +136,7 @@ def test_mixed_four_pages_alternating(tmp_path, digital_page_obj, scanned_page_o
     assert result.page_count == 4
 
     # OCR CHỈ được gọi cho các trang 2 và 4
-    assert engine.recorded_pages == [2, 4]
+    assert sorted(engine.recorded_pages) == [2, 4]
 
     # Kiểm tra thứ tự và cấu trúc [PAGE 1] đến [PAGE 4]
     blocks = result.tagged_text.split("\n\n")
@@ -238,7 +241,7 @@ def test_existing_fully_scanned_compatibility():
     assert result.mode == "ocr"
     assert result.fallback_reason == "PDFBlankPageError"
     assert result.page_count == 2
-    assert engine.recorded_pages == [1, 2]
+    assert sorted(engine.recorded_pages) == [1, 2]
 
 
 # ==============================================================================
@@ -273,7 +276,7 @@ def test_acceptance_ten_page_selective_ocr(tmp_path, digital_page_obj, scanned_p
     assert result.fallback_reason == "PDFBlankPageError"
 
     # CHỈ nhận 2 cuộc gọi cho trang 3 và trang 8:
-    assert engine.recorded_pages == [3, 8], f"Kỳ vọng OCR chỉ gọi [3, 8], thực tế: {engine.recorded_pages}"
+    assert sorted(engine.recorded_pages) == [3, 8], f"Kỳ vọng OCR chỉ gọi [3, 8], thực tế: {engine.recorded_pages}"
 
     # Tuyệt đối không gọi OCR cho các trang digital:
     for non_ocr_page in [1, 2, 4, 5, 6, 7, 9, 10]:

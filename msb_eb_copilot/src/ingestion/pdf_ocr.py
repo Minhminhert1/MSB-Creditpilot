@@ -27,8 +27,10 @@ Tuân thủ nghiêm ngặt các nguyên tắc:
 import os
 import io
 import base64
+import threading
+import concurrent.futures
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 
 import pypdf
@@ -231,6 +233,46 @@ class QwenVisionOCREngine(BaseOCREngine):
             raise OCRServiceError(f"Lỗi không xác định khi gọi OCR trang {page_num}: {str(exc)}") from exc
 
 
+DEFAULT_OCR_MAX_WORKERS = 4
+MIN_OCR_MAX_WORKERS = 1
+MAX_OCR_MAX_WORKERS = 8
+
+
+def get_ocr_max_workers(configured: Optional[int] = None) -> int:
+    """Xác định số lượng worker xử lý OCR song song có giới hạn an toàn.
+
+    Quy tắc:
+    - Nếu truyền trực tiếp `configured`: sử dụng giá trị đó (sau khi kiểm tra/clamp).
+    - Nếu không, đọc biến môi trường OCR_MAX_WORKERS.
+    - Nếu không có biến môi trường hoặc rỗng: mặc định là DEFAULT_OCR_MAX_WORKERS (4).
+    - Giá trị không hợp lệ (không phải số nguyên, chuỗi không parse được, giá trị < 1): an toàn trả về mặc định 4.
+    - Giá trị vượt quá giới hạn an toàn (> 8): kẹp (clamp) về tối đa MAX_OCR_MAX_WORKERS (8).
+    - Giá trị từ 1 đến 8: giữ nguyên (giá trị 1 tái tạo ngữ nghĩa tuần tự).
+    """
+    raw_val = configured
+    if raw_val is None:
+        raw_env = os.getenv("OCR_MAX_WORKERS")
+        if raw_env is not None and str(raw_env).strip():
+            try:
+                raw_val = int(str(raw_env).strip())
+            except ValueError:
+                return DEFAULT_OCR_MAX_WORKERS
+        else:
+            return DEFAULT_OCR_MAX_WORKERS
+
+    if not isinstance(raw_val, int):
+        try:
+            raw_val = int(raw_val)
+        except (ValueError, TypeError):
+            return DEFAULT_OCR_MAX_WORKERS
+
+    if raw_val < MIN_OCR_MAX_WORKERS:
+        return DEFAULT_OCR_MAX_WORKERS
+    if raw_val > MAX_OCR_MAX_WORKERS:
+        return MAX_OCR_MAX_WORKERS
+    return raw_val
+
+
 # ==============================================================================
 # 4. PDF OCR INGESTOR (ORCHESTRATOR & PREFLIGHT)
 # ==============================================================================
@@ -239,12 +281,14 @@ class PDFOCRIngestor:
     1. Preflight kiểm tra tính hợp lệ và mã hóa bằng pypdf
     2. Đối chiếu số trang vật lý giữa pypdf và pypdfium2
     3. Rasterize từng trang độc lập sang PNG (150 DPI mặc định)
-    4. Gửi nhận dạng qua OCR Engine
+    4. Gửi nhận dạng qua OCR Engine (hỗ trợ thực thi song song có giới hạn OCR_MAX_WORKERS)
     5. Kiểm định văn bản OCR tất định
     6. Lắp ráp thành chuỗi [PAGE X] chuẩn hợp đồng
     """
 
     DEFAULT_DPI = 150
+    DEFAULT_MAX_WORKERS = DEFAULT_OCR_MAX_WORKERS
+    _pdfium_render_lock = threading.Lock()
 
     @classmethod
     def _preflight_pdf(cls, pdf_path: str) -> int:
@@ -268,7 +312,7 @@ class PDFOCRIngestor:
     @classmethod
     def ocr_single_page(
         cls,
-        pdfium_doc: pdfium.PdfDocument,
+        doc_or_path: Any,
         page_num: int,
         engine: Optional[BaseOCREngine] = None,
         dpi: int = DEFAULT_DPI,
@@ -276,7 +320,8 @@ class PDFOCRIngestor:
         """Thực hiện rasterize và OCR cho đúng một trang PDF vật lý cụ thể (1-based page_num).
 
         Args:
-            pdfium_doc: Đối tượng pdfium.PdfDocument đã mở.
+            doc_or_path: Đường dẫn tệp PDF (str) hoặc đối tượng pdfium.PdfDocument đã mở.
+                Khuyến nghị truyền đường dẫn tệp (str) khi chạy đa luồng để bảo đảm an toàn bộ nhớ C++.
             page_num: Số thứ tự trang vật lý 1-based (dùng cho logging, OCR engine, và telemetry).
             engine: Engine OCR để nhận dạng. Nếu None, mặc định sử dụng QwenVisionOCREngine().
             dpi: Độ phân giải rasterize (mặc định 150 DPI).
@@ -294,19 +339,35 @@ class PDFOCRIngestor:
         page_idx = page_num - 1
         scale = dpi / 72.0
 
-        try:
-            page = pdfium_doc[page_idx]
-        except Exception as exc:
-            raise OCRRenderError(f"Lỗi truy xuất trang {page_num} từ PDFium: {str(exc)}") from exc
+        # Rasterize trang sang ảnh PIL an toàn với PDFium C++ global runtime
+        with cls._pdfium_render_lock:
+            should_close_doc = False
+            if isinstance(doc_or_path, str):
+                try:
+                    pdfium_doc = pdfium.PdfDocument(doc_or_path)
+                    should_close_doc = True
+                except Exception as exc:
+                    raise OCRRenderError(f"Không thể mở tài liệu bằng PDFium: {str(exc)}") from exc
+            else:
+                pdfium_doc = doc_or_path
 
-        # Rasterize trang sang ảnh PIL và đóng handle trang ngay
-        try:
             try:
-                pil_img = page.render(scale=scale).to_pil()
-            except Exception as exc:
-                raise OCRRenderError(f"Lỗi rasterize trang {page_num} tại {dpi} DPI: {str(exc)}") from exc
-        finally:
-            page.close()  # Giải phóng bitmap C++ của trang ngay lập tức
+                try:
+                    page = pdfium_doc[page_idx]
+                except Exception as exc:
+                    raise OCRRenderError(f"Lỗi truy xuất trang {page_num} từ PDFium: {str(exc)}") from exc
+
+                # Rasterize trang sang ảnh PIL và đóng handle trang ngay
+                try:
+                    try:
+                        pil_img = page.render(scale=scale).to_pil()
+                    except Exception as exc:
+                        raise OCRRenderError(f"Lỗi rasterize trang {page_num} tại {dpi} DPI: {str(exc)}") from exc
+                finally:
+                    page.close()  # Giải phóng bitmap C++ của trang ngay lập tức
+            finally:
+                if should_close_doc:
+                    pdfium_doc.close()  # Đóng tài liệu PDFium ngay lập tức trước khi gọi OCR!
 
         # Mã hóa ảnh sang định dạng PNG Base64 trong bộ nhớ
         try:
@@ -341,11 +402,90 @@ class PDFOCRIngestor:
         )
 
     @classmethod
+    def ocr_pages_parallel(
+        cls,
+        pdf_path: str,
+        page_nums: List[int],
+        engine: Optional[BaseOCREngine] = None,
+        dpi: int = DEFAULT_DPI,
+        max_workers: Optional[int] = None,
+    ) -> Dict[int, OCRPageResult]:
+        """Thực hiện OCR song song có giới hạn (Bounded Parallel OCR) cho danh sách các trang vật lý.
+
+        Args:
+            pdf_path: Đường dẫn tới file PDF.
+            page_nums: Danh sách số thứ tự trang vật lý 1-based cần OCR.
+            engine: OCR Engine tùy chọn.
+            dpi: Độ phân giải rasterize (mặc định 150 DPI).
+            max_workers: Số luồng tối đa (mặc định đọc từ OCR_MAX_WORKERS hoặc 4, bounded [1, 8]).
+
+        Returns:
+            Dict mapping từ page_num -> OCRPageResult.
+
+        Raises:
+            OCRIngestionError (OCRTimeoutError, OCRNoTextError, OCRServiceError, OCRRenderError,...):
+            Nếu bất kỳ trang nào thất bại, ngoại lệ nguyên gốc được lan truyền và hủy các tác vụ chờ.
+        """
+        if not page_nums:
+            return {}
+
+        active_engine = engine or QwenVisionOCREngine()
+        workers = get_ocr_max_workers(max_workers)
+        effective_workers = min(workers, len(page_nums))
+
+        # Nếu chỉ có 1 trang hoặc workers == 1: chạy tuần tự an toàn
+        if effective_workers == 1:
+            results: Dict[int, OCRPageResult] = {}
+            for p_num in page_nums:
+                page_res = cls.ocr_single_page(
+                    doc_or_path=pdf_path,
+                    page_num=p_num,
+                    engine=active_engine,
+                    dpi=dpi
+                )
+                results[p_num] = page_res
+            return results
+
+        # Chạy song song có giới hạn bằng ThreadPoolExecutor
+        results: Dict[int, OCRPageResult] = {}
+        first_exception: Optional[Exception] = None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            future_to_page = {
+                executor.submit(
+                    cls.ocr_single_page,
+                    doc_or_path=pdf_path,
+                    page_num=p_num,
+                    engine=active_engine,
+                    dpi=dpi
+                ): p_num
+                for p_num in page_nums
+            }
+
+            for future in concurrent.futures.as_completed(future_to_page):
+                p_num = future_to_page[future]
+                try:
+                    res = future.result()
+                    results[p_num] = res
+                except Exception as exc:
+                    if first_exception is None:
+                        first_exception = exc
+                    # Hủy các future còn đang pending trong queue
+                    for f in future_to_page:
+                        f.cancel()
+
+        if first_exception is not None:
+            raise first_exception
+
+        return results
+
+    @classmethod
     def extract_document(
         cls,
         pdf_path: str,
         engine: Optional[BaseOCREngine] = None,
-        dpi: int = DEFAULT_DPI
+        dpi: int = DEFAULT_DPI,
+        max_workers: Optional[int] = None,
     ) -> OCRDocumentResult:
         """Thực hiện OCR toàn bộ tài liệu PDF và trả về đối tượng kết quả có cấu trúc."""
         # 1. Preflight xác định số trang dự kiến bằng pypdf
@@ -357,63 +497,60 @@ class PDFOCRIngestor:
         # 3. Mở tài liệu bằng pypdfium2 và kiểm tra đối chiếu số trang
         try:
             pdfium_doc = pdfium.PdfDocument(pdf_path)
+            try:
+                actual_pdfium_page_count = len(pdfium_doc)
+                if actual_pdfium_page_count != expected_page_count:
+                    raise OCRPageCountError(
+                        f"Bất đồng số trang vật lý: pypdf xác nhận {expected_page_count} trang, "
+                        f"nhưng PDFium phát hiện {actual_pdfium_page_count} trang."
+                    )
+            finally:
+                pdfium_doc.close()
+        except OCRPageCountError:
+            raise
         except Exception as exc:
             raise OCRRenderError(f"Không thể mở tài liệu bằng PDFium: {str(exc)}") from exc
 
-        try:
-            actual_pdfium_page_count = len(pdfium_doc)
+        # 4. Thực hiện OCR song song có giới hạn cho toàn bộ các trang 1..N
+        all_pages = list(range(1, expected_page_count + 1))
+        results_by_page = cls.ocr_pages_parallel(
+            pdf_path=pdf_path,
+            page_nums=all_pages,
+            engine=active_engine,
+            dpi=dpi,
+            max_workers=max_workers,
+        )
 
-            # Bắt buộc: Đối chiếu số trang vật lý giữa pypdf và pypdfium2 (Correction 2)
-            if actual_pdfium_page_count != expected_page_count:
-                raise OCRPageCountError(
-                    f"Bất đồng số trang vật lý: pypdf xác nhận {expected_page_count} trang, "
-                    f"nhưng PDFium phát hiện {actual_pdfium_page_count} trang."
-                )
-
-            page_results: List[OCRPageResult] = []
-
-            # 4. Vòng lặp tuần tự (Lazy/Sequential processing): chỉ giữ 1 trang trong RAM tại mỗi thời điểm
-            for page_idx in range(expected_page_count):
-                page_num = page_idx + 1
-                page_result = cls.ocr_single_page(
-                    pdfium_doc=pdfium_doc,
-                    page_num=page_num,
-                    engine=active_engine,
-                    dpi=dpi
-                )
-                page_results.append(page_result)
-
-            # Bắt buộc: Đối chiếu số lượng kết quả trang hoàn thành với số trang dự kiến (Correction 2)
-            if len(page_results) != expected_page_count:
-                raise OCRPageCountError(
-                    f"Bất biến số trang bị vi phạm: Dự kiến {expected_page_count} trang, "
-                    f"nhưng chỉ thu được {len(page_results)} kết quả OCR."
-                )
-
-            # 7. Lắp ráp chuỗi định dạng thẻ [PAGE X] chuẩn hợp đồng
-            tagged_blocks = [f"[PAGE {p.page_num}]\n{p.text}" for p in page_results]
-            tagged_text = "\n\n".join(tagged_blocks)
-
-            return OCRDocumentResult(
-                tagged_text=tagged_text,
-                page_count=expected_page_count,
-                pages=page_results,
-                provider=getattr(active_engine, "provider_name", "qwen_vision")
+        # 5. Đối chiếu bất biến số lượng kết quả
+        if len(results_by_page) != expected_page_count:
+            raise OCRPageCountError(
+                f"Bất biến số trang bị vi phạm: Dự kiến {expected_page_count} trang, "
+                f"nhưng chỉ thu được {len(results_by_page)} kết quả OCR."
             )
 
-        finally:
-            pdfium_doc.close()  # Đóng tài liệu PDFium, giải phóng hoàn toàn bộ nhớ C++
+        # 6. Lắp ráp chuỗi định dạng thẻ [PAGE X] chuẩn hợp đồng theo đúng thứ tự 1..N
+        page_results = [results_by_page[p_num] for p_num in range(1, expected_page_count + 1)]
+        tagged_blocks = [f"[PAGE {p.page_num}]\n{p.text}" for p in page_results]
+        tagged_text = "\n\n".join(tagged_blocks)
+
+        return OCRDocumentResult(
+            tagged_text=tagged_text,
+            page_count=expected_page_count,
+            pages=page_results,
+            provider=getattr(active_engine, "provider_name", "qwen_vision")
+        )
 
     @classmethod
     def extract_text_with_page_markers(
         cls,
         pdf_path: str,
         engine: Optional[BaseOCREngine] = None,
-        dpi: int = DEFAULT_DPI
+        dpi: int = DEFAULT_DPI,
+        max_workers: Optional[int] = None,
     ) -> str:
         """Trích xuất văn bản gắn thẻ [PAGE X] từ tài liệu PDF quét/ảnh.
-        
+
         Đây là giao diện drop-in trực tiếp tương thích hoàn toàn với LegalDocumentExtractor.extract().
         """
-        doc_result = cls.extract_document(pdf_path, engine=engine, dpi=dpi)
+        doc_result = cls.extract_document(pdf_path, engine=engine, dpi=dpi, max_workers=max_workers)
         return doc_result.tagged_text

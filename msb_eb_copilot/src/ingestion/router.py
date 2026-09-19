@@ -79,6 +79,7 @@ class DocumentIngestionRouter:
         pdf_path: str,
         ocr_engine: Optional[BaseOCREngine] = None,
         dpi: int = DEFAULT_DPI,
+        max_workers: Optional[int] = None,
     ) -> DocumentIngestionResult:
         """Nhập liệu tệp PDF với chính sách ưu tiên digital text, chỉ fallback sang OCR khi cần thiết.
 
@@ -86,6 +87,7 @@ class DocumentIngestionRouter:
             pdf_path: Đường dẫn tuyệt đối hoặc tương đối tới tệp PDF.
             ocr_engine: Engine OCR tùy chọn (mặc định khởi tạo QwenVisionOCREngine).
             dpi: Độ phân giải rasterize trang khi kích hoạt OCR fallback (mặc định 150).
+            max_workers: Số luồng OCR song song tối đa (mặc định đọc từ OCR_MAX_WORKERS hoặc 4, bounded [1, 8]).
 
         Returns:
             DocumentIngestionResult chứa tagged_text và metadata nguồn gốc.
@@ -120,7 +122,8 @@ class DocumentIngestionRouter:
                 ocr_result = PDFOCRIngestor.extract_document(
                     pdf_path,
                     engine=ocr_engine,
-                    dpi=dpi
+                    dpi=dpi,
+                    max_workers=max_workers,
                 )
                 return DocumentIngestionResult(
                     tagged_text=ocr_result.tagged_text,
@@ -153,7 +156,8 @@ class DocumentIngestionRouter:
                 ocr_result = PDFOCRIngestor.extract_document(
                     pdf_path,
                     engine=active_engine,
-                    dpi=dpi
+                    dpi=dpi,
+                    max_workers=max_workers,
                 )
                 return DocumentIngestionResult(
                     tagged_text=ocr_result.tagged_text,
@@ -166,29 +170,29 @@ class DocumentIngestionRouter:
             # TRƯỜNG HỢP B: Hỗn hợp (HYBRID: một số trang digital, một số trang cần OCR)
             try:
                 pdfium_doc = pdfium.PdfDocument(pdf_path)
+                try:
+                    actual_pdfium_page_count = len(pdfium_doc)
+                    if actual_pdfium_page_count != total_pages:
+                        raise OCRPageCountError(
+                            f"Bất đồng số trang vật lý: pypdf xác nhận {total_pages} trang, "
+                            f"nhưng PDFium phát hiện {actual_pdfium_page_count} trang."
+                        )
+                finally:
+                    pdfium_doc.close()
+            except OCRPageCountError:
+                raise
             except Exception as render_exc:
                 raise OCRRenderError(f"Không thể mở tài liệu bằng PDFium: {str(render_exc)}") from render_exc
 
-            try:
-                actual_pdfium_page_count = len(pdfium_doc)
-                if actual_pdfium_page_count != total_pages:
-                    raise OCRPageCountError(
-                        f"Bất đồng số trang vật lý: pypdf xác nhận {total_pages} trang, "
-                        f"nhưng PDFium phát hiện {actual_pdfium_page_count} trang."
-                    )
-
-                ocr_pages: Dict[int, str] = {}
-                # CHỈ rasterize và OCR đúng các trang trong ocr_page_indices
-                for page_num in ocr_page_indices:
-                    page_res = PDFOCRIngestor.ocr_single_page(
-                        pdfium_doc=pdfium_doc,
-                        page_num=page_num,
-                        engine=active_engine,
-                        dpi=dpi
-                    )
-                    ocr_pages[page_num] = page_res.text
-            finally:
-                pdfium_doc.close()
+            # Thực hiện OCR song song có giới hạn CHỈ cho các trang trong ocr_page_indices
+            ocr_pages_result = PDFOCRIngestor.ocr_pages_parallel(
+                pdf_path=pdf_path,
+                page_nums=ocr_page_indices,
+                engine=active_engine,
+                dpi=dpi,
+                max_workers=max_workers,
+            )
+            ocr_pages = {p_num: res.text for p_num, res in ocr_pages_result.items()}
 
             # Bất biến số trang: Lắp ráp tất định theo đúng thứ tự trang vật lý 1..N
             assembled_blocks: List[str] = []
@@ -220,10 +224,11 @@ class DocumentIngestionRouter:
         pdf_path: str,
         ocr_engine: Optional[BaseOCREngine] = None,
         dpi: int = DEFAULT_DPI,
+        max_workers: Optional[int] = None,
     ) -> str:
         """Giao diện tiện ích: Trả về trực tiếp chuỗi văn bản [PAGE X] sạch.
 
         Tương thích trực tiếp để truyền thẳng vào LegalDocumentExtractor.extract().
         """
-        result = cls.ingest_document(pdf_path, ocr_engine=ocr_engine, dpi=dpi)
+        result = cls.ingest_document(pdf_path, ocr_engine=ocr_engine, dpi=dpi, max_workers=max_workers)
         return result.tagged_text

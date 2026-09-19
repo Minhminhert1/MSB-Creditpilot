@@ -16,6 +16,7 @@ Bảo đảm:
 
 import os
 import json
+import threading
 import pytest
 import pypdf
 from unittest.mock import patch, MagicMock
@@ -60,9 +61,11 @@ class DummyCustomOCREngine(BaseOCREngine):
     def __init__(self, responses=None):
         self.responses = responses or {}
         self.call_count = 0
+        self._lock = threading.Lock()
 
     def ocr_page(self, base64_png: str, page_num: int) -> str:
-        self.call_count += 1
+        with self._lock:
+            self.call_count += 1
         return self.responses.get(page_num, f"Nội dung OCR giả lập trang {page_num}")
 
 
