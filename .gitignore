@@ -20,3 +20,5 @@ case_input_template.json
 
 *.doc
 Tham*/
+
+.local_cache/

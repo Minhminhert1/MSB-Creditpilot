@@ -11,9 +11,12 @@ Strict Boundary:
 """
 
 from __future__ import annotations
+import os
 import json
 import re
 import unicodedata
+import threading
+import concurrent.futures
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -281,7 +284,7 @@ ACCOUNTING_CORROBORATION_RULES: Dict[str, Dict[str, Any]] = {
     },
     "cogs": {
         "expected_code": "11",
-        "keywords": ["giá vốn", "giá vốn hàng bán", "cost of goods sold"],
+        "keywords": ["giá vốn hàng bán", "giá vốn hàng bán và dịch vụ cung cấp", "giá vốn bán hàng", "cost of goods sold"],
     },
     "gross_profit": {
         "expected_code": "20",
@@ -434,19 +437,28 @@ Nhiệm vụ: Trích xuất các sự thật tài chính THÔ (RAW SOURCE FACTS)
 
 QUY TẮC CỐT LÕI (BẮT BUỘC TUÂN THỦ 100%):
 1. NO EVIDENCE -> NO FACT: Chỉ trích xuất số liệu xuất hiện tường minh trên tài liệu kèm trích dẫn văn bản (evidence) và số trang (page). Không có chứng cứ -> để null.
-2. CHỈ TRÍCH XUẤT SỰ THẬT NGUỒN:
+2. CHỈ TRÍCH XUẤT SỰ THẬT NGUỒN TỪ BÁO CÁO CHÍNH THỨC:
    - Báo cáo Kết quả kinh doanh (P&L): net_revenue, cogs, gross_profit, financial_income, financial_expenses, interest_expenses, sga_expenses, net_profit_before_tax, net_profit_after_tax.
    - Bảng Cân đối kế toán (Balance Sheet): current_assets, cash, receivables, inventories, total_assets, total_liabilities, current_liabilities, short_term_debt, equity.
-3. TUYỆT ĐỐI CẤM TÍNH TOÁN HAY SUY ĐOÁN:
+3. PHÂN BIỆT RÕ CHỈ TIÊU BÁO CÁO CHÍNH THỨC (STATEMENTS) VS THÀNH PHẦN THUYẾT MINH (NOTES):
+   - Các trường trong schema đại diện cho CHỈ TIÊU TỔNG HỢP CHÍNH THỨC trên Báo cáo Kết quả Hoạt động Kinh doanh (Mẫu B02-DN) và Bảng Cân đối Kế toán (Mẫu B01-DN).
+   - TUYỆT ĐỐI KHÔNG trích xuất các dòng thành phần, tiểu mục trong phần Thuyết minh (Notes) vào các trường chỉ tiêu chính thức:
+     * cogs: Phải là chỉ tiêu chính thức "Giá vốn hàng bán" hoặc "Giá vốn hàng bán và dịch vụ cung cấp" (Mã số 11 trên P&L B02-DN). TUYỆT ĐỐI KHÔNG lấy dòng "Giá vốn hàng hóa" trong Thuyết minh "Chi phí sản xuất, kinh doanh theo yếu tố". Nếu phân đoạn chỉ có Thuyết minh chi phí theo yếu tố mà không có Báo cáo KQKD, BẮT BUỘC để cogs: null.
+     * sga_expenses: Chỉ lấy dòng tổng "Chi phí bán hàng" (Mã 25) và "Chi phí quản lý doanh nghiệp" (Mã 26) trên P&L. KHÔNG lấy các thành phần chi tiết trong thuyết minh (nhân công, khấu hao, tiếp khách...).
+     * short_term_debt: Chỉ lấy chỉ tiêu "Vay và nợ thuê tài chính ngắn hạn" (Mã 320) trên Bảng cân đối. KHÔNG lấy các khoản vay từng ngân hàng riêng lẻ trong thuyết minh.
+     * cash: Chỉ lấy chỉ tiêu "Tiền và các khoản tương đương tiền" (Mã 110). KHÔNG lấy tiểu mục "Tiền mặt tại quỹ" hay chi tiết từng tài khoản trong thuyết minh.
+     * receivables: Chỉ lấy chỉ tiêu "Các khoản phải thu ngắn hạn" (Mã 130). KHÔNG lấy chi tiết phải thu từng khách hàng riêng lẻ trong thuyết minh.
+   - Nếu phân đoạn trang (chunk) CHỈ chứa Thuyết minh chi tiết mà không có bảng báo cáo tổng hợp chính thức, BẮT BUỘC để các trường đó là null.
+4. TUYỆT ĐỐI CẤM TÍNH TOÁN HAY SUY ĐOÁN:
    - KHÔNG tính các chỉ số an toàn tài chính (current_ratio, quick_ratio, debt_to_equity, DSCR, ROS, ROE,...).
    - KHÔNG tính toán chu kỳ kinh doanh (CCC, MB09) hay lợi nhuận điều chỉnh rủi ro (RORWA).
    - Python sẽ tự động tính toán 100% các chỉ số này.
-4. XÁC ĐỊNH ĐƠN VỊ TÍNH (UNIT) GẮN LIỀN VỚI TỪNG TRANG:
+5. XÁC ĐỊNH ĐƠN VỊ TÍNH (UNIT) GẮN LIỀN VỚI TỪNG TRANG:
    - Tìm câu văn ghi đơn vị tính (ví dụ: 'Đơn vị tính: VND', 'Đơn vị tính: triệu đồng').
    - Ghi nhận unit_raw và unit_evidence.
-5. PHÂN TÁCH RÕ RÀNG TỪNG NĂM / KỲ KẾ TOÁN (PERIOD):
+6. PHÂN TÁCH RÕ RÀNG TỪNG NĂM / KỲ KẾ TOÁN (PERIOD):
    - Xác định rõ cột số liệu thuộc năm nào (ví dụ: '2025', '2024'). Không được tráo đổi thứ tự cột.
-6. ĐỊNH DẠNG ĐẦU RA:
+7. ĐỊNH DẠNG ĐẦU RA:
    - BẮT BUỘC trả về định dạng JSON thuần túy (strict JSON), KHÔNG dùng Markdown fence (không viết ```json), KHÔNG có lời giải thích bên ngoài.
 
 CẤU TRÚC JSON MẪU:
@@ -484,56 +496,697 @@ CẤU TRÚC JSON MẪU:
 """
 
 
-class FinancialDocumentExtractor:
-    """Orchestrates GreenNode financial document extraction with grounding audit."""
+# ==============================================================================
+# 5. FINANCIAL EXTRACTION EXCEPTION HIERARCHY & CONFIGURATION
+# ==============================================================================
 
-    def __init__(self, ai_client: Optional[Any] = None):
-        self.ai_client = ai_client
+class FinancialExtractionError(ValueError):
+    """Lỗi cơ sở cho toàn bộ quy trình trích xuất báo cáo tài chính."""
+    pass
 
-    def extract(self, tagged_text: str, page_count: int, api_key: Optional[str] = None) -> FinancialDocumentExtraction:
-        """Call GreenNode MaaS text model to extract structured financial staging data."""
-        user_prompt = f"""Hãy đọc kỹ toàn bộ văn bản Báo cáo tài chính dưới đây (đã phân chia theo thẻ [PAGE X]):
 
-{tagged_text}
+class FinancialPageMarkerError(FinancialExtractionError):
+    """Lỗi khi cấu trúc thẻ trang [PAGE X] không hợp lệ, thiếu, hoặc trùng lặp."""
+    pass
 
-Trích xuất toàn bộ các sự thật tài chính nguồn theo đúng hướng dẫn hệ thống. Bắt buộc trả về JSON hợp lệ."""
 
-        if self.ai_client and hasattr(self.ai_client, "generate_text"):
-            resp_text = self.ai_client.generate_text(
-                prompt=user_prompt,
-                system_prompt=FINANCIAL_EXTRACTION_SYSTEM_PROMPT,
-                operation="financial_extraction",
-            )
-        elif self.ai_client and hasattr(self.ai_client, "chat"):
-            resp_text = self.ai_client.chat(
-                system_prompt=FINANCIAL_EXTRACTION_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                temperature=0.0,
-                max_tokens=4096,
-                api_key=api_key,
-                operation="financial_extraction",
-            )
+class FinancialChunkExtractionError(FinancialExtractionError):
+    """Lỗi khi trích xuất một phân đoạn tài liệu (JSON hỏng, cắt cụt, hoặc lỗi mạng)."""
+    pass
+
+
+class FinancialMergeConflictError(FinancialExtractionError):
+    """Lỗi khi hợp nhất các phân đoạn phát hiện dữ liệu xung đột không thể giải quyết tất định."""
+    pass
+
+
+FINANCIAL_SOURCE_FACT_FIELDS: List[str] = [
+    "net_revenue",
+    "cogs",
+    "gross_profit",
+    "financial_income",
+    "financial_expenses",
+    "interest_expenses",
+    "sga_expenses",
+    "net_profit_before_tax",
+    "net_profit_after_tax",
+    "current_assets",
+    "cash",
+    "receivables",
+    "inventories",
+    "total_assets",
+    "total_liabilities",
+    "current_liabilities",
+    "short_term_debt",
+    "equity",
+]
+
+
+def is_note_disclosure_cogs(cogs_val: Any) -> bool:
+    """Kiểm tra xem dữ liệu cogs có phải là một thành phần trong Thuyết minh (Notes)
+    như 'Chi phí sản xuất, kinh doanh theo yếu tố' hay 'Giá vốn hàng hóa' thay vì
+    chỉ tiêu Giá vốn hàng bán chính thức trên Báo cáo Kết quả Kinh doanh (Mẫu B02-DN).
+
+    Quy tắc phân định tất định:
+    1. Nếu có accounting_code == '11' (mã chuẩn P&L TT 200), đây là chỉ tiêu chính thức -> KHÔNG phải note.
+    2. Nếu nhãn hoặc bằng chứng thể hiện Thuyết minh chi phí theo yếu tố (expense by nature)
+       hoặc nhãn là 'Giá vốn hàng hóa' (thương phẩm) mà không có mã 11 -> ĐÂY LÀ NOTE COMPONENT.
+    """
+    if not isinstance(cogs_val, dict):
+        return False
+
+    code = str(cogs_val.get("accounting_code") or "").strip()
+    if code == "11":
+        return False
+
+    label = unicodedata.normalize("NFC", str(cogs_val.get("semantic_label") or "")).strip().lower()
+    evidence = unicodedata.normalize("NFC", str(cogs_val.get("evidence") or "")).strip().lower()
+
+    # Thuyết minh chi phí sản xuất kinh doanh theo yếu tố
+    expense_by_nature_markers = [
+        "chi phí sản xuất, kinh doanh theo yếu tố",
+        "chi phí sản xuất kinh doanh theo yếu tố",
+        "chi phí theo yếu tố",
+        "chi phí sản xuất theo yếu tố",
+        "expense by nature",
+        "expenses by nature",
+    ]
+    if any(m in evidence for m in expense_by_nature_markers) or any(m in label for m in expense_by_nature_markers):
+        return True
+
+    # Nhãn 'giá vốn hàng hóa' khi không có mã 11
+    if label in ("giá vốn hàng hóa", "gia von hang hoa") or label.startswith("giá vốn hàng hóa"):
+        return True
+
+    return False
+
+
+def normalize_financial_extraction_raw_dict(raw_dict: Any) -> Any:
+    """Chuẩn hóa dictionary thô nhận được từ LLM trước khi gọi model_validate.
+
+    Quy tắc:
+    - Loại bỏ thành phần thuyết minh chi tiết bị gán nhầm vào chỉ tiêu chính thức:
+      Ví dụ: cogs thuộc Thuyết minh chi phí theo yếu tố ('Giá vốn hàng hóa') không có mã 11
+      sẽ được loại bỏ (coi như vắng mặt fact chính thức trong phân đoạn này).
+    - CHỈ loại bỏ các khóa thuộc FINANCIAL_SOURCE_FACT_FIELDS trong mỗi period dictionary
+      nếu giá trị của khóa đó là None (null từ JSON).
+    - Không loại bỏ hoặc can thiệp vào 'period', 'document_title', 'document_unit', 'page_units'.
+    - Không sửa chữa ngầm các giá trị non-null không hợp lệ (ví dụ: chuỗi thay vì object).
+    - Khi một trường bị loại bỏ, Pydantic sẽ sử dụng default_factory mặc định (vắng mặt sự thật).
+    """
+    if not isinstance(raw_dict, dict):
+        return raw_dict
+
+    def _clean_period_dict(period_obj: Dict[str, Any]) -> None:
+        # Lọc bỏ thành phần thuyết minh cogs bị gán nhầm
+        if "cogs" in period_obj and is_note_disclosure_cogs(period_obj["cogs"]):
+            del period_obj["cogs"]
+
+        for field_name in FINANCIAL_SOURCE_FACT_FIELDS:
+            if field_name in period_obj and period_obj[field_name] is None:
+                del period_obj[field_name]
+
+    # Trường hợp 1: raw_dict là tài liệu chứa danh sách periods
+    periods = raw_dict.get("periods")
+    if isinstance(periods, list):
+        for period_obj in periods:
+            if isinstance(period_obj, dict):
+                _clean_period_dict(period_obj)
+
+    # Trường hợp 2: raw_dict chính là một period dictionary đơn lẻ
+    if "period" in raw_dict:
+        _clean_period_dict(raw_dict)
+
+    return raw_dict
+
+
+DEFAULT_FINANCIAL_PAGES_PER_CHUNK = 5
+MIN_FINANCIAL_PAGES_PER_CHUNK = 2
+MAX_FINANCIAL_PAGES_PER_CHUNK = 10
+
+DEFAULT_FINANCIAL_EXTRACTION_MAX_WORKERS = 2
+MIN_FINANCIAL_EXTRACTION_MAX_WORKERS = 1
+MAX_FINANCIAL_EXTRACTION_MAX_WORKERS = 4
+
+
+def get_financial_pages_per_chunk(configured: Optional[Union[int, str]] = None) -> int:
+    """Xác định số trang trên mỗi phân đoạn trích xuất tài chính.
+
+    Quy tắc:
+    - Nếu truyền configured: dùng giá trị đó sau khi kiểm tra / clamp.
+    - Nếu không: đọc biến môi trường FINANCIAL_PAGES_PER_CHUNK.
+    - Nếu không có biến MT hoặc rỗng: mặc định DEFAULT_FINANCIAL_PAGES_PER_CHUNK (5).
+    - Nếu giá trị không parse được thành số nguyên: an toàn trả về mặc định 5.
+    - Nếu < 2: an toàn trả về mặc định 5.
+    - Nếu > 10: kẹp (clamp) về tối đa 10.
+    - Nếu trong khoảng [2, 10]: trả về giá trị đó.
+    """
+    raw_val = configured
+    if raw_val is None:
+        raw_env = os.getenv("FINANCIAL_PAGES_PER_CHUNK")
+        if raw_env is not None and str(raw_env).strip():
+            try:
+                raw_val = int(str(raw_env).strip())
+            except ValueError:
+                return DEFAULT_FINANCIAL_PAGES_PER_CHUNK
         else:
-            resp_text = AIAssistantClient.chat(
-                system_prompt=FINANCIAL_EXTRACTION_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                temperature=0.0,
-                max_tokens=4096,
-                api_key=api_key,
-                operation="financial_extraction",
+            return DEFAULT_FINANCIAL_PAGES_PER_CHUNK
+
+    try:
+        val = int(raw_val)
+    except (ValueError, TypeError):
+        return DEFAULT_FINANCIAL_PAGES_PER_CHUNK
+
+    if val < MIN_FINANCIAL_PAGES_PER_CHUNK:
+        return DEFAULT_FINANCIAL_PAGES_PER_CHUNK
+    if val > MAX_FINANCIAL_PAGES_PER_CHUNK:
+        return MAX_FINANCIAL_PAGES_PER_CHUNK
+    return val
+
+
+def get_financial_extraction_max_workers(configured: Optional[Union[int, str]] = None) -> int:
+    """Xác định số lượng worker chạy trích xuất chunk song song có giới hạn an toàn.
+
+    Quy tắc:
+    - Nếu truyền configured: dùng giá trị đó sau khi kiểm tra / clamp.
+    - Nếu không: đọc biến môi trường FINANCIAL_EXTRACTION_MAX_WORKERS.
+    - Nếu không có biến MT hoặc rỗng: mặc định DEFAULT_FINANCIAL_EXTRACTION_MAX_WORKERS (2).
+    - Nếu giá trị không parse được thành số nguyên: an toàn trả về mặc định 2.
+    - Nếu < 1: an toàn trả về mặc định 2.
+    - Nếu > 4: kẹp (clamp) về tối đa 4.
+    - Nếu trong khoảng [1, 4]: trả về giá trị đó.
+    """
+    raw_val = configured
+    if raw_val is None:
+        raw_env = os.getenv("FINANCIAL_EXTRACTION_MAX_WORKERS")
+        if raw_env is not None and str(raw_env).strip():
+            try:
+                raw_val = int(str(raw_env).strip())
+            except ValueError:
+                return DEFAULT_FINANCIAL_EXTRACTION_MAX_WORKERS
+        else:
+            return DEFAULT_FINANCIAL_EXTRACTION_MAX_WORKERS
+
+    try:
+        val = int(raw_val)
+    except (ValueError, TypeError):
+        return DEFAULT_FINANCIAL_EXTRACTION_MAX_WORKERS
+
+    if val < MIN_FINANCIAL_EXTRACTION_MAX_WORKERS:
+        return DEFAULT_FINANCIAL_EXTRACTION_MAX_WORKERS
+    if val > MAX_FINANCIAL_EXTRACTION_MAX_WORKERS:
+        return MAX_FINANCIAL_EXTRACTION_MAX_WORKERS
+    return val
+
+
+# ==============================================================================
+# 6. DETERMINISTIC PAGE PARSER & CHUNKER
+# ==============================================================================
+
+@dataclass(frozen=True)
+class FinancialPageChunk:
+    """Đại diện cho một phân đoạn trang vật lý của Báo cáo tài chính."""
+    chunk_index: int
+    start_page: int
+    end_page: int
+    page_nums: List[int]
+    tagged_text: str
+
+
+def parse_tagged_pages(
+    tagged_text: str,
+    page_count: Optional[int] = None,
+) -> List[Tuple[int, str]]:
+    """Phân tách văn bản gắn thẻ [PAGE X] thành danh sách các trang vật lý (page_num, page_content).
+
+    Bất biến bắt buộc:
+    - Đầu vào phải là chuỗi (string).
+    - Chỉ cho phép ký tự khoảng trắng trước thẻ [PAGE X] đầu tiên.
+    - Bắt buộc phải có ít nhất một thẻ [PAGE X].
+    - Số trang phải là số nguyên > 0.
+    - Chuỗi trang vật lý phải bắt đầu từ trang 1 và liên tục tăng dần nghiêm ngặt (1, 2, ..., N),
+      không ngắt quãng (gaps), không đảo thứ tự (reordering), không trùng lặp (duplicates).
+    - Nếu có tham số page_count: số trang thực tế và số trang lớn nhất phải khớp chính xác với page_count.
+    - Giữ nguyên số trang vật lý gốc, tuyệt đối không đánh lại số trang.
+    """
+    if not isinstance(tagged_text, str):
+        raise FinancialPageMarkerError("Văn bản nguồn phải là kiểu chuỗi (string).")
+
+    pattern = re.compile(r"\[PAGE\s+(-?\d+)\]")
+    matches = list(pattern.finditer(tagged_text))
+
+    if not matches:
+        raise FinancialPageMarkerError("Văn bản nguồn không chứa bất kỳ thẻ trang [PAGE X] hợp lệ nào.")
+
+    first_match = matches[0]
+    preamble = tagged_text[:first_match.start()]
+    if preamble.strip() != "":
+        raise FinancialPageMarkerError(
+            f"Văn bản nguồn chứa nội dung không phải khoảng trắng trước thẻ trang đầu tiên: '{preamble.strip()[:100]}'"
+        )
+
+    seen_pages = set()
+    pages: List[Tuple[int, str]] = []
+
+    for i, match in enumerate(matches):
+        page_num_str = match.group(1)
+        try:
+            page_num = int(page_num_str)
+        except ValueError:
+            raise FinancialPageMarkerError(f"Số trang không hợp lệ: '{page_num_str}'")
+
+        if page_num <= 0:
+            raise FinancialPageMarkerError(f"Số trang trong thẻ [PAGE {page_num}] phải > 0.")
+
+        if page_num in seen_pages:
+            raise FinancialPageMarkerError(f"Phát hiện trùng lặp thẻ trang: [PAGE {page_num}].")
+        seen_pages.add(page_num)
+
+        expected_page = i + 1
+        if i == 0 and page_num != 1:
+            raise FinancialPageMarkerError(
+                f"Chuỗi trang vật lý phải bắt đầu từ trang 1, nhưng bắt đầu từ [PAGE {page_num}]."
+            )
+        if page_num != expected_page:
+            raise FinancialPageMarkerError(
+                f"Phát hiện gián đoạn hoặc sai thứ tự trang vật lý: kỳ vọng [PAGE {expected_page}], nhưng gặp [PAGE {page_num}]."
             )
 
-        # Parse JSON
+        start_pos = match.end()
+        end_pos = matches[i + 1].start() if i + 1 < len(matches) else len(tagged_text)
+        page_content = tagged_text[start_pos:end_pos]
+        pages.append((page_num, page_content))
+
+    if page_count is not None:
+        try:
+            expected_count = int(page_count)
+        except (ValueError, TypeError):
+            raise FinancialPageMarkerError(f"Số lượng trang kỳ vọng (page_count={page_count}) không hợp lệ.")
+
+        if expected_count <= 0:
+            raise FinancialPageMarkerError(f"Số lượng trang kỳ vọng (page_count={expected_count}) phải > 0.")
+
+        actual_count = len(pages)
+        max_page = pages[-1][0] if pages else 0
+        if actual_count != expected_count or max_page != expected_count:
+            raise FinancialPageMarkerError(
+                f"Bất đồng số lượng trang: tài liệu thực tế có {actual_count} trang (1..{max_page}) "
+                f"nhưng tham số page_count yêu cầu {expected_count} trang."
+            )
+
+    return pages
+
+
+def chunk_pages(
+    pages: List[Tuple[int, str]],
+    pages_per_chunk: int = DEFAULT_FINANCIAL_PAGES_PER_CHUNK,
+) -> List[FinancialPageChunk]:
+    """Phân tách danh sách các trang thành các chunk theo ranh giới trang vật lý."""
+    if not pages:
+        return []
+
+    chunks: List[FinancialPageChunk] = []
+    chunk_idx = 1
+    for i in range(0, len(pages), pages_per_chunk):
+        slice_pages = pages[i : i + pages_per_chunk]
+        page_nums = [p_num for p_num, _ in slice_pages]
+        start_page = min(page_nums)
+        end_page = max(page_nums)
+
+        chunk_blocks: List[str] = []
+        for p_num, content in slice_pages:
+            body = content if content.startswith("\n") else f"\n{content}"
+            chunk_blocks.append(f"[PAGE {p_num}]{body.rstrip()}")
+        chunk_text = "\n\n".join(chunk_blocks)
+
+        chunks.append(
+            FinancialPageChunk(
+                chunk_index=chunk_idx,
+                start_page=start_page,
+                end_page=end_page,
+                page_nums=page_nums,
+                tagged_text=chunk_text,
+            )
+        )
+        chunk_idx += 1
+
+    return chunks
+
+
+# ==============================================================================
+# 7. DETERMINISTIC PYTHON MERGE
+# ==============================================================================
+
+def are_evidence_fields_identical(f1: FinancialEvidenceField, f2: FinancialEvidenceField) -> bool:
+    """Kiểm tra xem hai FinancialEvidenceField có biểu diễn cùng một giá trị tài chính tương đương và đơn vị tương thích hay không.
+
+    Lưu ý: Số trang khác nhau (ví dụ: số liệu xuất hiện ở Báo cáo tài chính trang 8 và Thuyết minh trang 21)
+    KHÔNG phải là xung đột nếu giá trị số và đơn vị tính tương thích.
+    """
+    raw1 = str(f1.value_raw).strip() if f1.value_raw is not None else ""
+    raw2 = str(f2.value_raw).strip() if f2.value_raw is not None else ""
+
+    if not raw1 and not raw2:
+        return True
+    if not raw1 or not raw2:
+        return False
+
+    # 1. Kiểm tra tính tương thích của đơn vị tính nếu cả hai đều khai báo tường minh
+    if f1.unit_raw and f2.unit_raw:
+        u1 = unicodedata.normalize("NFC", str(f1.unit_raw)).strip().lower()
+        u2 = unicodedata.normalize("NFC", str(f2.unit_raw)).strip().lower()
+        if u1 != u2:
+            return False
+
+    # 2. Nếu chuỗi thô giống hệt nhau
+    if raw1 == raw2:
+        return True
+
+    # 3. Đối chiếu giá trị số sau chuẩn hóa tiền tệ / kế toán (Decimal equivalence)
+    tok1, err1 = LexicalFinancialNumberParser.parse_token(raw1)
+    tok2, err2 = LexicalFinancialNumberParser.parse_token(raw2)
+    if tok1 is not None and tok2 is not None and not err1 and not err2:
+        val1, v_err1 = AccountingSemanticInterpreter.interpret(tok1)
+        val2, v_err2 = AccountingSemanticInterpreter.interpret(tok2)
+        if val1 is not None and val2 is not None and val1 == val2:
+            return True
+
+    return False
+
+
+def _merge_evidence_field(
+    period_key: str,
+    field_name: str,
+    f1: FinancialEvidenceField,
+    f2: FinancialEvidenceField,
+) -> FinancialEvidenceField:
+    """Hợp nhất hai trường bằng chứng tài chính theo quy tắc không ghi đè ngầm và bắt lỗi xung đột."""
+    f1_has_val = f1.value_raw is not None and str(f1.value_raw).strip() != ""
+    f2_has_val = f2.value_raw is not None and str(f2.value_raw).strip() != ""
+
+    if not f1_has_val and not f2_has_val:
+        return f1
+
+    if not f1_has_val and f2_has_val:
+        return f2
+
+    if f1_has_val and not f2_has_val:
+        return f1
+
+    # Cả hai đều có giá trị -> Kiểm tra xung đột đơn vị tính trước
+    if f1.unit_raw and f2.unit_raw:
+        u1 = unicodedata.normalize("NFC", str(f1.unit_raw)).strip().lower()
+        u2 = unicodedata.normalize("NFC", str(f2.unit_raw)).strip().lower()
+        if u1 != u2:
+            raise FinancialMergeConflictError(
+                f"Xung đột đơn vị tính tại kỳ '{period_key}', chỉ tiêu '{field_name}': "
+                f"'{f1.unit_raw}' (trang {f1.page}) vs '{f2.unit_raw}' (trang {f2.page})."
+            )
+
+    # Kiểm tra giá trị trùng lặp / tương đương
+    if are_evidence_fields_identical(f1, f2):
+        # Lựa chọn đại diện tất định: ưu tiên trang vật lý nhỏ hơn; nếu một bên có trang, một bên không thì ưu tiên bên có trang.
+        prefer_f1 = True
+        if f1.page is not None and f2.page is not None:
+            prefer_f1 = f1.page <= f2.page
+        elif f1.page is None and f2.page is not None:
+            prefer_f1 = False
+        elif f1.page is not None and f2.page is None:
+            prefer_f1 = True
+
+        rep = f1 if prefer_f1 else f2
+        other = f2 if prefer_f1 else f1
+
+        unit_raw = rep.unit_raw if rep.unit_raw is not None else other.unit_raw
+        unit_evidence = rep.unit_evidence if rep.unit_raw is not None else other.unit_evidence
+        accounting_code = rep.accounting_code or other.accounting_code
+        semantic_label = rep.semantic_label or other.semantic_label
+
+        return FinancialEvidenceField(
+            value_raw=rep.value_raw,
+            semantic_label=semantic_label,
+            accounting_code=accounting_code,
+            unit_raw=unit_raw,
+            unit_evidence=unit_evidence,
+            evidence=rep.evidence,
+            page=rep.page,
+        )
+
+    raise FinancialMergeConflictError(
+        f"Xung đột dữ liệu không thể hợp nhất cho kỳ '{period_key}', chỉ tiêu '{field_name}': "
+        f"giá trị '{f1.value_raw}' (trang {f1.page}) và '{f2.value_raw}' (trang {f2.page})."
+    )
+
+
+def merge_financial_extractions(
+    extractions: List[FinancialDocumentExtraction],
+) -> FinancialDocumentExtraction:
+    """Hợp nhất tất định danh sách các kết quả trích xuất chunk thành một FinancialDocumentExtraction duy nhất.
+
+    Quy tắc:
+    A. PAGE UNITS: Hợp nhất theo số trang vật lý gốc. Trùng lặp cùng đơn vị -> gộp tất định. Xung đột đơn vị -> báo lỗi.
+    B. PERIODS: Nhận diện kỳ theo chuỗi kỳ chuẩn hóa. Ghép trường theo từng field_name.
+    C. DUPLICATE IDENTICAL FACT: Cùng kỳ, cùng trường, cùng giá trị/trang -> gộp tất định.
+    D. CONFLICTING FACT: Khác giá trị non-null -> ném ngoại lệ FinancialMergeConflictError, cấm last-write-wins.
+    """
+    if not extractions:
+        return FinancialDocumentExtraction()
+
+    if len(extractions) == 1:
+        return extractions[0]
+
+    # 1. Hợp nhất document_title: Tiêu đề phi rỗng đầu tiên theo thứ tự chunk được chọn làm đại diện
+    merged_title: Optional[str] = None
+    for ext in extractions:
+        if ext.document_title and ext.document_title.strip():
+            t = ext.document_title.strip()
+            if merged_title is None:
+                merged_title = t
+
+    # 2. Hợp nhất document_unit
+    merged_doc_unit: Optional[FinancialUnitInfo] = None
+    for ext in extractions:
+        if ext.document_unit is not None:
+            if merged_doc_unit is None:
+                merged_doc_unit = ext.document_unit
+            else:
+                norm_u1 = unicodedata.normalize("NFC", merged_doc_unit.unit_raw).strip().lower()
+                norm_u2 = unicodedata.normalize("NFC", ext.document_unit.unit_raw).strip().lower()
+                if norm_u1 != norm_u2:
+                    raise FinancialMergeConflictError(
+                        f"Xung đột đơn vị tính tài liệu (document_unit): '{merged_doc_unit.unit_raw}' "
+                        f"(trang {merged_doc_unit.page}) và '{ext.document_unit.unit_raw}' (trang {ext.document_unit.page})."
+                    )
+
+    # 3. Hợp nhất page_units
+    merged_page_units: Dict[int, FinancialUnitInfo] = {}
+    for ext in extractions:
+        for page_num_raw, unit_info in ext.page_units.items():
+            p_num = int(page_num_raw)
+            if p_num not in merged_page_units:
+                merged_page_units[p_num] = unit_info
+            else:
+                existing_unit = merged_page_units[p_num]
+                norm_u1 = unicodedata.normalize("NFC", existing_unit.unit_raw).strip().lower()
+                norm_u2 = unicodedata.normalize("NFC", unit_info.unit_raw).strip().lower()
+                if norm_u1 != norm_u2:
+                    raise FinancialMergeConflictError(
+                        f"Xung đột đơn vị tính tại trang {p_num} (page_units): "
+                        f"'{existing_unit.unit_raw}' vs '{unit_info.unit_raw}'."
+                    )
+
+    # 4. Hợp nhất periods theo từng kỳ và từng trường
+    merged_periods_map: Dict[str, FinancialPeriodExtraction] = {}
+    period_order: List[str] = []
+
+    for ext in extractions:
+        for p in ext.periods:
+            pkey = unicodedata.normalize("NFC", p.period).strip()
+            if pkey not in merged_periods_map:
+                merged_periods_map[pkey] = FinancialPeriodExtraction(period=pkey)
+                period_order.append(pkey)
+
+            target_period = merged_periods_map[pkey]
+            for field_name in FINANCIAL_SOURCE_FACT_FIELDS:
+                existing_field = getattr(target_period, field_name)
+                incoming_field = getattr(p, field_name)
+
+                merged_field = _merge_evidence_field(
+                    period_key=pkey,
+                    field_name=field_name,
+                    f1=existing_field,
+                    f2=incoming_field,
+                )
+                setattr(target_period, field_name, merged_field)
+
+    merged_periods = [merged_periods_map[pkey] for pkey in period_order]
+
+    return FinancialDocumentExtraction(
+        document_title=merged_title,
+        periods=merged_periods,
+        page_units=merged_page_units,
+        document_unit=merged_doc_unit,
+    )
+
+
+# ==============================================================================
+# 8. FINANCIAL DOCUMENT EXTRACTOR (PAGE CHUNKING ORCHESTRATOR)
+# ==============================================================================
+
+class FinancialDocumentExtractor:
+    """Orchestrates GreenNode financial document extraction with page chunking and grounding audit."""
+
+    def __init__(
+        self,
+        ai_client: Optional[Any] = None,
+        pages_per_chunk: Optional[int] = None,
+        max_workers: Optional[int] = None,
+    ):
+        self.ai_client = ai_client
+        self.pages_per_chunk = pages_per_chunk
+        self.max_workers = max_workers
+
+    def _extract_chunk(
+        self,
+        chunk: FinancialPageChunk,
+        api_key: Optional[str] = None,
+    ) -> FinancialDocumentExtraction:
+        """Thực hiện trích xuất cho đúng 1 phân đoạn trang độc lập."""
+        user_prompt = f"""Bạn đang xử lý một phần của Báo cáo tài chính, bao gồm các trang vật lý từ [PAGE {chunk.start_page}] đến [PAGE {chunk.end_page}]:
+
+{chunk.tagged_text}
+
+HƯỚNG DẪN XỬ LÝ PHÂN ĐOẠN:
+1. Đây CHỈ LÀ MỘT PHẦN (subset) của toàn bộ BCTC.
+2. CHỈ trích xuất các sự thật tài chính (facts) và đơn vị tính (unit) xuất hiện TƯỜNG MINH trong các trang vật lý này.
+3. CHỈ TIÊU CHÍNH THỨC TRÊN BÁO CÁO VS THÀNH PHẦN THUYẾT MINH:
+   - Các trường tài chính đại diện cho chỉ tiêu tổng hợp chính thức trên Báo cáo Kết quả Kinh doanh (P&L Mẫu B02-DN) và Bảng Cân đối Kế toán (Mẫu B01-DN).
+   - TUYỆT ĐỐI KHÔNG gán các dòng chi tiết trong Thuyết minh (Notes) vào chỉ tiêu chính:
+     * cogs: Phải là chỉ tiêu chính "Giá vốn hàng bán" (Mã số 11) trên P&L. TUYỆT ĐỐI KHÔNG lấy dòng "Giá vốn hàng hóa" trong Thuyết minh "Chi phí sản xuất, kinh doanh theo yếu tố".
+     * Nếu phân đoạn này chỉ có Thuyết minh chi tiết theo yếu tố mà không có chỉ tiêu P&L chính thức, BẮT BUỘC để cogs: null hoặc bỏ qua.
+     * Tương tự với sga_expenses, cash, receivables, short_term_debt: không lấy thành phần thuyết minh chi tiết thay cho chỉ tiêu chính thức.
+4. BẮT BUỘC giữ nguyên số trang vật lý gốc trong trường "page" (ví dụ: nếu số liệu nằm ở [PAGE {chunk.start_page}], "page" phải là {chunk.start_page}). TUYỆT ĐỐI KHÔNG đánh lại số trang từ 1.
+5. NO EVIDENCE -> NO FACT: Trường nào không có số liệu/bằng chứng trong các trang này thì để null hoặc bỏ qua, TUYỆT ĐỐI KHÔNG tự suy đoán số liệu từ các năm khác hay phân đoạn khác.
+6. KHÔNG tính toán bất kỳ chỉ số tài chính nào.
+7. Bắt buộc trả về đúng định dạng JSON thuần túy (strict JSON)."""
+
+        operation = f"financial_extraction_pages_{chunk.start_page}_{chunk.end_page}"
+
+        try:
+            if self.ai_client and hasattr(self.ai_client, "generate_text"):
+                resp_text = self.ai_client.generate_text(
+                    prompt=user_prompt,
+                    system_prompt=FINANCIAL_EXTRACTION_SYSTEM_PROMPT,
+                    operation=operation,
+                )
+            elif self.ai_client and hasattr(self.ai_client, "chat"):
+                resp_text = self.ai_client.chat(
+                    system_prompt=FINANCIAL_EXTRACTION_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    temperature=0.0,
+                    max_tokens=4096,
+                    api_key=api_key,
+                    operation=operation,
+                )
+            else:
+                resp_text = AIAssistantClient.chat(
+                    system_prompt=FINANCIAL_EXTRACTION_SYSTEM_PROMPT,
+                    user_prompt=user_prompt,
+                    temperature=0.0,
+                    max_tokens=4096,
+                    api_key=api_key,
+                    operation=operation,
+                )
+        except Exception as e:
+            raise FinancialChunkExtractionError(
+                f"Lỗi khi gọi GreenNode cho phân đoạn trang {chunk.start_page}-{chunk.end_page}: {str(e)}"
+            ) from e
+
+        if resp_text is None:
+            raise FinancialChunkExtractionError(
+                f"GreenNode trả về phản hồi rỗng (None) cho phân đoạn trang {chunk.start_page}-{chunk.end_page}."
+            )
+
         cleaned_json = resp_text.strip()
         if cleaned_json.startswith("```"):
-            cleaned_json = re.sub(r"^```(?:json)?\s*", "", cleaned_json)
+            cleaned_json = re.sub(r"^```(?:json)?\s*", "", cleaned_json, flags=re.IGNORECASE)
             cleaned_json = re.sub(r"\s*```$", "", cleaned_json)
+        cleaned_json = cleaned_json.strip()
 
         try:
             raw_dict = json.loads(cleaned_json)
         except json.JSONDecodeError as e:
-            raise ValueError(f"GreenNode returned invalid JSON for financial extraction: {e}\nRaw: {resp_text[:300]}")
+            snippet = cleaned_json[:200] if len(cleaned_json) > 200 else cleaned_json
+            raise FinancialChunkExtractionError(
+                f"GreenNode returned invalid JSON for financial chunk pages {chunk.start_page}-{chunk.end_page}: {str(e)}\nSnippet: {snippet}"
+            ) from e
 
-        # Construct Pydantic model
-        extraction = FinancialDocumentExtraction.model_validate(raw_dict)
-        return extraction
+        if not isinstance(raw_dict, dict):
+            raise FinancialChunkExtractionError(
+                f"GreenNode trả về định dạng không phải JSON Object cho phân đoạn trang {chunk.start_page}-{chunk.end_page}."
+            )
+
+        raw_dict = normalize_financial_extraction_raw_dict(raw_dict)
+
+        try:
+            extraction = FinancialDocumentExtraction.model_validate(raw_dict)
+            return extraction
+        except Exception as e:
+            raise FinancialChunkExtractionError(
+                f"Lỗi kiểm thực Pydantic cho phân đoạn trang {chunk.start_page}-{chunk.end_page}: {str(e)}"
+            ) from e
+
+    def extract(
+        self,
+        tagged_text: str,
+        page_count: Optional[int] = None,
+        api_key: Optional[str] = None,
+        pages_per_chunk: Optional[int] = None,
+        max_workers: Optional[int] = None,
+    ) -> FinancialDocumentExtraction:
+        """Trích xuất dữ liệu tài chính qua cơ chế phân đoạn trang (chunking) và hợp nhất tất định."""
+        parsed_pages = parse_tagged_pages(tagged_text, page_count=page_count)
+        if not parsed_pages:
+            return FinancialDocumentExtraction()
+
+        effective_ppc = get_financial_pages_per_chunk(pages_per_chunk or self.pages_per_chunk)
+        effective_workers = get_financial_extraction_max_workers(max_workers or self.max_workers)
+
+        chunks = chunk_pages(parsed_pages, pages_per_chunk=effective_ppc)
+        if not chunks:
+            return FinancialDocumentExtraction()
+
+        # Nếu chỉ có 1 chunk hoặc worker = 1: chạy tuần tự an toàn
+        if len(chunks) == 1 or effective_workers == 1:
+            chunk_results: List[FinancialDocumentExtraction] = []
+            for chunk in chunks:
+                res = self._extract_chunk(chunk, api_key=api_key)
+                chunk_results.append(res)
+            return merge_financial_extractions(chunk_results)
+
+        # Chạy song song có giới hạn bằng ThreadPoolExecutor
+        workers_bound = min(effective_workers, len(chunks))
+        chunk_results_dict: Dict[int, FinancialDocumentExtraction] = {}
+        first_exc: Optional[Exception] = None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers_bound) as executor:
+            future_to_chunk = {
+                executor.submit(self._extract_chunk, chunk, api_key=api_key): chunk
+                for chunk in chunks
+            }
+            for future in concurrent.futures.as_completed(future_to_chunk):
+                chunk = future_to_chunk[future]
+                try:
+                    res = future.result()
+                    chunk_results_dict[chunk.chunk_index] = res
+                except Exception as exc:
+                    if first_exc is None:
+                        first_exc = exc
+                    for f in future_to_chunk:
+                        f.cancel()
+
+        if first_exc is not None:
+            raise first_exc
+
+        ordered_results = [chunk_results_dict[idx] for idx in sorted(chunk_results_dict.keys())]
+        return merge_financial_extractions(ordered_results)
