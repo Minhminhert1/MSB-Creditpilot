@@ -902,26 +902,26 @@ HTML_PAGE = """<!DOCTYPE html>
     </div>
   </header>
 
-  <!-- 6-STEP HAPPY PATH NAVIGATION -->
+  <!-- 6-STEP RM HAPPY PATH NAVIGATION -->
   <div class="bg-white border-b border-slate-200 sticky top-16 z-30 shadow-sm">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex overflow-x-auto space-x-6 text-sm font-medium text-slate-600">
       <button onclick="switchTab('tab-dashboard')" id="nav-tab-dashboard" class="py-3.5 px-3 tab-active whitespace-nowrap flex items-center space-x-1.5">
-        <span>🏢 1. Tổng Quan Hồ Sơ</span>
+        <span>🏢 1. Hồ Sơ Khách Hàng</span>
       </button>
       <button onclick="switchTab('tab-upload')" id="nav-tab-upload" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5">
-        <span>📂 2. Không Gian Hồ Sơ</span>
+        <span>📂 2. Không Gian Tài Liệu</span>
       </button>
       <button onclick="switchTab('tab-review')" id="nav-tab-review" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5">
-        <span>📋 3. Đối Soát Dữ Liệu (A - E)</span>
+        <span>📋 3. Dữ Liệu Đã Xác Nhận</span>
       </button>
       <button onclick="switchTab('tab-insights')" id="nav-tab-insights" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5 text-blue-700 font-semibold">
         <span>💡 4. Thẩm Định Tín Dụng AI</span>
       </button>
       <button onclick="switchTab('tab-narrative')" id="nav-tab-narrative" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5 text-red-600 font-semibold">
-        <span>📝 5. Soạn Thảo & Tờ Trình MB07</span>
+        <span>📝 5. Tờ Trình / Narrative</span>
       </button>
       <button onclick="switchTab('tab-committee')" id="nav-tab-committee" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5 text-amber-700 font-bold bg-amber-50/60 rounded-t-lg">
-        <span>🎯 6. Sẵn Sàng Hội Đồng Tín Dụng</span>
+        <span>🎯 6. Credit Committee Prep</span>
       </button>
     </div>
   </div>
@@ -941,6 +941,9 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
       </div>
       <div class="flex items-center space-x-2">
+        <span id="case-source-badge" class="text-xs bg-amber-500/20 text-amber-300 px-3 py-1 rounded-full font-bold border border-amber-400/30 whitespace-nowrap">
+          DEMO DATA (PRELOADED)
+        </span>
         <span class="text-xs bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full font-bold border border-emerald-400/30 whitespace-nowrap" id="banner-readiness">
           ✓ Mức độ sẵn sàng: 100%
         </span>
@@ -1042,85 +1045,141 @@ HTML_PAGE = """<!DOCTYPE html>
         <div class="flex items-center justify-between border-b pb-3">
           <div>
             <h3 class="font-bold text-base text-[#003366]">📂 Danh Mục Tài Liệu Hồ Sơ Khách Hàng</h3>
-            <p class="text-xs text-slate-500">Bóc tách tự động đa tài liệu qua GreenNode Document AI với bằng chứng đối soát trang</p>
+            <p class="text-xs text-slate-500">Bóc tách tự động đa tài liệu qua GreenNode Document AI với bằng chứng đối soát trang (No Evidence → No Fact)</p>
           </div>
-          <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded">4/4 Nhóm Tài Liệu Đã Nạp</span>
+          <span id="doc-workspace-badge" class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded">4/4 Nhóm Tài Liệu Đã Nạp</span>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- CARD 1: LEGAL -->
-          <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
-            <div class="flex items-center justify-between">
+          <div id="card-legal" class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+            <input type="file" id="file-legal" accept=".pdf" class="hidden" onchange="handleFileSelected('legal', this)">
+            <div class="flex items-start justify-between">
               <div class="flex items-center space-x-2">
                 <span class="text-xl">🏛️</span>
                 <div>
                   <div class="text-sm font-bold text-slate-800">1. Hồ sơ Pháp lý & ĐKKD</div>
-                  <div class="text-xs text-slate-500">Giay_Phep_DKKD_PSD.pdf (Trang 1 - 3)</div>
+                  <div id="file-name-legal" class="text-xs text-slate-500">Giay_Phep_DKKD_PSD.pdf (Trang 1 - 3)</div>
                 </div>
               </div>
-              <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã bóc tách & xác nhận</span>
+              <div id="status-badge-legal">
+                <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã bóc tách & xác nhận</span>
+              </div>
             </div>
-            <div class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
-              <div>• Tên DN: <span class="font-semibold text-slate-800">CTCP Dịch vụ Phân phối TH Dầu khí</span></div>
-              <div>• MST: <span class="font-semibold text-slate-800">0100000000</span> | Vốn ĐL: <span class="font-semibold text-slate-800">518.279 tr</span></div>
-              <div>• ĐDPL: <span class="font-semibold text-slate-800">Đại diện Demo</span> (Tổng Giám đốc)</div>
+            <div id="summary-legal" class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
+              <div>• Tên DN: <span id="sum-legal-name" class="font-semibold text-slate-800">CTCP Dịch vụ Phân phối TH Dầu khí</span></div>
+              <div>• MST: <span id="sum-legal-tax" class="font-semibold text-slate-800">0100000000</span> | Vốn ĐL: <span id="sum-legal-capital" class="font-semibold text-slate-800">518.279 tr</span></div>
+              <div>• ĐDPL: <span id="sum-legal-rep" class="font-semibold text-slate-800">Đại diện Demo</span> (Tổng Giám đốc)</div>
+            </div>
+            <div id="actions-legal" class="flex items-center justify-between pt-1">
+              <span id="tip-legal" class="text-[11px] text-slate-400 italic">Đã đồng bộ vào Phần A MB07</span>
+              <div class="flex space-x-2">
+                <button onclick="triggerDocUpload('legal')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
+                  🔄 Thay thế PDF
+                </button>
+                <button onclick="openReviewModal('legal')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
+                  🔍 Xem Lại Bóc Tách
+                </button>
+              </div>
             </div>
           </div>
 
           <!-- CARD 2: BUSINESS -->
-          <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
-            <div class="flex items-center justify-between">
+          <div id="card-business" class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+            <input type="file" id="file-business" accept=".pdf" class="hidden" onchange="handleFileSelected('business', this)">
+            <div class="flex items-start justify-between">
               <div class="flex items-center space-x-2">
                 <span class="text-xl">🏭</span>
                 <div>
                   <div class="text-sm font-bold text-slate-800">2. Mô hình KD & Chuỗi cung ứng</div>
-                  <div class="text-xs text-slate-500">Bao_Cao_Thuong_Nien_PSD.pdf (Trang 15 - 42)</div>
+                  <div id="file-name-business" class="text-xs text-slate-500">Bao_Cao_Thuong_Nien_PSD.pdf (Trang 15 - 42)</div>
                 </div>
               </div>
-              <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã bóc tách chuỗi cung ứng</span>
+              <div id="status-badge-business">
+                <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã bóc tách chuỗi cung ứng</span>
+              </div>
             </div>
-            <div class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
-              <div>• Mô hình: <span class="font-semibold text-slate-800">Thương mại Phân phối ICT</span></div>
-              <div>• Nhà cung cấp chính: <span class="font-semibold text-slate-800">Dell (28.1%), Lenovo (20.4%), Samsung (19.1%)</span></div>
-              <div>• Khách hàng chính: <span class="font-semibold text-slate-800">MWG (4.5%), Viettel Store, FPT Shop</span></div>
+            <div id="summary-business" class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
+              <div>• Mô hình: <span id="sum-biz-model" class="font-semibold text-slate-800">Thương mại Phân phối ICT</span></div>
+              <div>• Nhà cung cấp chính: <span id="sum-biz-suppliers" class="font-semibold text-slate-800">Dell (28.1%), Lenovo (20.4%), Samsung (19.1%)</span></div>
+              <div>• Khách hàng chính: <span id="sum-biz-customers" class="font-semibold text-slate-800">MWG (4.5%), Viettel Store, FPT Shop</span></div>
+            </div>
+            <div id="actions-business" class="flex items-center justify-between pt-1">
+              <span id="tip-business" class="text-[11px] text-slate-400 italic">Đã đồng bộ vào Phần C MB07</span>
+              <div class="flex space-x-2">
+                <button onclick="triggerDocUpload('business')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
+                  🔄 Thay thế PDF
+                </button>
+                <button onclick="openReviewModal('business')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
+                  🔍 Xem Lại Bóc Tách
+                </button>
+              </div>
             </div>
           </div>
 
-          <!-- CARD 3: FINANCIAL STATEMENTS -->
-          <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
-            <div class="flex items-center justify-between">
+          <!-- CARD 3: FINANCIAL -->
+          <div id="card-financial" class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+            <input type="file" id="file-financial" accept=".pdf" class="hidden" onchange="handleFileSelected('financial', this)">
+            <div class="flex items-start justify-between">
               <div class="flex items-center space-x-2">
                 <span class="text-xl">📈</span>
                 <div>
-                  <div class="text-sm font-bold text-slate-800">3. BCTC Kiểm toán 3 năm (2023 - 2025)</div>
-                  <div class="text-xs text-slate-500">BCTC_Kiem_Toan_PwC_2025.pdf</div>
+                  <div class="text-sm font-bold text-slate-800">3. BCTC Kiểm toán 3 năm</div>
+                  <div id="file-name-financial" class="text-xs text-slate-500">BCTC_Kiem_Toan_PwC_2025.pdf</div>
                 </div>
               </div>
-              <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã đối soát 3 năm</span>
+              <div id="status-badge-financial">
+                <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã đối soát 3 năm</span>
+              </div>
             </div>
-            <div class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
-              <div>• Đơn vị kiểm toán: <span class="font-semibold text-slate-800">PwC Việt Nam (Chấp thuận toàn phần)</span></div>
-              <div>• Doanh thu 2025: <span class="font-semibold text-slate-800">7.819.398 tr</span> (+37.1%)</div>
-              <div>• LNST 2025: <span class="font-semibold text-slate-800">134.201 tr</span> | VCSH: <span class="font-semibold text-slate-800">729.343 tr</span></div>
+            <div id="summary-financial" class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
+              <div>• Đơn vị kiểm toán: <span id="sum-fin-auditor" class="font-semibold text-slate-800">PwC Việt Nam (Chấp thuận toàn phần)</span></div>
+              <div>• Doanh thu 2025: <span id="sum-fin-rev" class="font-semibold text-slate-800">7.819.398 tr</span></div>
+              <div>• LNST 2025: <span id="sum-fin-np" class="font-semibold text-slate-800">134.201 tr</span> | VCSH: <span id="sum-fin-equity" class="font-semibold text-slate-800">729.343 tr</span></div>
+            </div>
+            <div id="actions-financial" class="flex items-center justify-between pt-1">
+              <span id="tip-financial" class="text-[11px] text-slate-400 italic">Đã đồng bộ vào Phần D MB07</span>
+              <div class="flex space-x-2">
+                <button onclick="triggerDocUpload('financial')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
+                  🔄 Thay thế PDF
+                </button>
+                <button onclick="openReviewModal('financial')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
+                  🔍 Xem Lại Bóc Tách
+                </button>
+              </div>
             </div>
           </div>
 
           <!-- CARD 4: CIC -->
-          <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
-            <div class="flex items-center justify-between">
+          <div id="card-cic" class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+            <input type="file" id="file-cic" accept=".pdf" class="hidden" onchange="handleFileSelected('cic', this)">
+            <div class="flex items-start justify-between">
               <div class="flex items-center space-x-2">
                 <span class="text-xl">🏦</span>
                 <div>
                   <div class="text-sm font-bold text-slate-800">4. Báo cáo Tín dụng CIC Chi tiết</div>
-                  <div class="text-xs text-slate-500">Bao_Cao_CIC_Chi_Tiet_2025.pdf</div>
+                  <div id="file-name-cic" class="text-xs text-slate-500">Bao_Cao_CIC_Chi_Tiet_2025.pdf</div>
                 </div>
               </div>
-              <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã đối soát chuẩn mực</span>
+              <div id="status-badge-cic">
+                <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã đối soát chuẩn mực</span>
+              </div>
             </div>
-            <div class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
-              <div>• Ngày tra cứu CIC: <span class="font-semibold text-slate-800">31/12/2025</span></div>
-              <div>• Phân loại nợ: <span class="font-semibold text-emerald-700">100% Nhóm 1 (Đủ tiêu chuẩn 24 tháng)</span></div>
-              <div>• Dư nợ tại MSB: <span class="font-semibold text-slate-800">499.999 tr</span> | Dư nợ TCTD khác: <span class="font-semibold text-slate-800">Đầy đủ</span></div>
+            <div id="summary-cic" class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
+              <div>• Ngày tra cứu CIC: <span id="sum-cic-date" class="font-semibold text-slate-800">31/12/2025</span></div>
+              <div>• Phân loại nợ: <span id="sum-cic-status" class="font-semibold text-emerald-700">100% Nhóm 1 (Đủ tiêu chuẩn 24 tháng)</span></div>
+              <div>• Dư nợ tại MSB: <span id="sum-cic-msb" class="font-semibold text-slate-800">499.999 tr</span> | Dư nợ TCTD khác: <span id="sum-cic-other" class="font-semibold text-slate-800">Đầy đủ</span></div>
+            </div>
+            <div id="actions-cic" class="flex items-center justify-between pt-1">
+              <span id="tip-cic" class="text-[11px] text-slate-400 italic">Đã đồng bộ vào Phần E MB07</span>
+              <div class="flex space-x-2">
+                <button onclick="triggerDocUpload('cic')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
+                  🔄 Thay thế PDF
+                </button>
+                <button onclick="openReviewModal('cic')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
+                  🔍 Xem Lại Bóc Tách
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1487,9 +1546,104 @@ HTML_PAGE = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- MODAL: TẠO HỒ SƠ KHÁCH HÀNG MỚI -->
+  <div id="modal-new-case" class="hidden fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h3 class="font-bold text-base text-[#003366]">➕ Khởi Tạo Hồ Sơ Thẩm Định Mới</h3>
+        <button onclick="closeNewCaseModal()" class="text-slate-400 hover:text-slate-600 font-bold text-lg">&times;</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <div>
+          <label class="font-semibold text-slate-700">Tên Doanh Nghiệp đầy đủ <span class="text-red-500">*</span>:</label>
+          <input type="text" id="new-case-name" placeholder="VD: CÔNG TY CỔ PHẦN THƯƠNG MẠI ALPHA" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="font-semibold text-slate-700">Tên viết tắt / Mã gợi nhớ <span class="text-red-500">*</span>:</label>
+            <input type="text" id="new-case-short-name" placeholder="VD: ALPHA_JSC" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="font-semibold text-slate-700">Mã số thuế <span class="text-red-500">*</span>:</label>
+            <input type="text" id="new-case-tax-code" placeholder="VD: 0312345678" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="font-semibold text-slate-700">Vốn điều lệ (triệu VND):</label>
+            <input type="number" id="new-case-capital" placeholder="VD: 50000" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+          </div>
+          <div>
+            <label class="font-semibold text-slate-700">Hạn mức đề xuất (triệu VND):</label>
+            <input type="number" id="new-case-limit" placeholder="VD: 100000" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+          </div>
+        </div>
+        <div>
+          <label class="font-semibold text-slate-700">Địa chỉ đăng ký trụ sở:</label>
+          <input type="text" id="new-case-address" placeholder="VD: Số 123 Đường ABC, Phường Bến Nghé, Quận 1, TP.HCM" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+        </div>
+        <div>
+          <label class="font-semibold text-slate-700">Mô hình kinh doanh:</label>
+          <select id="new-case-business-model" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white">
+            <option value="THUONG_MAI">Thương mại Phân phối</option>
+            <option value="SAN_XUAT">Sản xuất</option>
+            <option value="SAN_XUAT_VA_THUONG_MAI">Sản xuất & Thương mại</option>
+            <option value="DICH_VU">Dịch vụ</option>
+            <option value="XAY_DUNG_BAT_DONG_SAN">Xây dựng & Bất động sản</option>
+          </select>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-2 pt-3 border-t">
+        <button onclick="closeNewCaseModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">Hủy</button>
+        <button onclick="submitNewCase()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow">
+          ➕ Khởi Tạo Hồ Sơ
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: ĐỐI SOÁT & XÁC NHẬN BÓC TÁCH (RM REVIEW MODAL) -->
+  <div id="modal-doc-review" class="hidden fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <div>
+          <h3 id="modal-review-title" class="font-bold text-base text-[#003366]">📋 Đối Soát Dữ Liệu Bóc Tách GreenNode AI</h3>
+          <p id="modal-review-subtitle" class="text-xs text-slate-500">Đối soát bằng chứng trang và giải quyết xung đột trước khi xác nhận vào hồ sơ MB07</p>
+        </div>
+        <button onclick="closeReviewModal()" class="text-slate-400 hover:text-slate-600 font-bold text-lg">&times;</button>
+      </div>
+
+      <!-- REVIEW CONTENT AREA -->
+      <div id="modal-review-body" class="max-h-[60vh] overflow-y-auto space-y-4 pr-1 text-xs">
+        <!-- Dynamic content injected by renderReviewBody -->
+      </div>
+
+      <div class="flex items-center justify-between pt-3 border-t">
+        <div class="text-[11px] text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
+          🛡️ <strong>Nguyên tắc MSB:</strong> Dữ liệu chỉ được xác nhận khi có số trang và trích dẫn bằng chứng xác thực.
+        </div>
+        <div class="flex space-x-2">
+          <button onclick="closeReviewModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">Đóng / Xem Lại Sau</button>
+          <button id="btn-confirm-review" onclick="confirmCurrentReview()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow flex items-center space-x-1.5">
+            <span>✓ Xác Nhận Vào Hồ Sơ (Commit)</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- JAVASCRIPT LOGIC -->
   <script>
     let CURRENT_ACTIVE_TAB = 'tab-dashboard';
+    let CURRENT_CASE_ID = 'PSD';
+    let CURRENT_REVIEW_DOCTYPE = null;
+
+    const DOC_STATES = {
+      legal: { state: 'RM_CONFIRMED', filename: 'Giay_Phep_DKKD_PSD.pdf', previewId: null, previewData: null },
+      business: { state: 'RM_CONFIRMED', filename: 'Bao_Cao_Thuong_Nien_PSD.pdf', previewId: null, previewData: null },
+      financial: { state: 'RM_CONFIRMED', filename: 'BCTC_Kiem_Toan_PwC_2025.pdf', previewId: null, previewData: null },
+      cic: { state: 'RM_CONFIRMED', filename: 'Bao_Cao_CIC_Chi_Tiet_2025.pdf', previewId: null, previewData: null }
+    };
 
     function switchTab(tabId) {
       const tabs = ['tab-dashboard', 'tab-upload', 'tab-review', 'tab-insights', 'tab-narrative', 'tab-committee'];
@@ -1511,42 +1665,966 @@ HTML_PAGE = """<!DOCTYPE html>
       }
     }
 
+    function readFileAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        if (!file) {
+          reject(new Error("Vui lòng chọn một tệp tin PDF."));
+          return;
+        }
+        if (!file.name.toLowerCase().endsWith('.pdf')) {
+          reject(new Error("Hệ thống chỉ chấp nhận tệp định dạng PDF (.pdf)."));
+          return;
+        }
+        const maxSize = 15 * 1024 * 1024; // 15MB
+        if (file.size > maxSize) {
+          reject(new Error("Dung lượng tệp PDF vượt quá giới hạn 15MB."));
+          return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          const res = reader.result;
+          const b64 = typeof res === 'string' && res.includes(',') ? res.split(',')[1] : res;
+          resolve(b64);
+        };
+        reader.onerror = (e) => reject(new Error("Lỗi đọc tệp tin: " + e.message));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function triggerDocUpload(docType) {
+      const input = document.getElementById('file-' + docType);
+      if (input) {
+        input.value = '';
+        input.click();
+      }
+    }
+
+    function updateWorkspaceHeaderBadge() {
+      const keys = ['legal', 'business', 'financial', 'cic'];
+      const confirmedCount = keys.filter(k => DOC_STATES[k].state === 'RM_CONFIRMED').length;
+      const badge = document.getElementById('doc-workspace-badge');
+      if (badge) {
+        badge.innerText = `${confirmedCount}/4 Nhóm Tài Liệu Sẵn Sàng`;
+        if (confirmedCount === 4) {
+          badge.className = 'text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded';
+        } else if (confirmedCount > 0) {
+          badge.className = 'text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-1 rounded';
+        } else {
+          badge.className = 'text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded';
+        }
+      }
+    }
+
+    function updateDocCardUI(docType) {
+      const info = DOC_STATES[docType];
+      const badgeEl = document.getElementById('status-badge-' + docType);
+      const nameEl = document.getElementById('file-name-' + docType);
+      const actionsEl = document.getElementById('actions-' + docType);
+      const tipEl = document.getElementById('tip-' + docType);
+
+      if (nameEl) {
+        nameEl.innerText = info.filename || 'Chưa có tệp PDF nào được nạp';
+      }
+
+      let badgeHtml = '';
+      let actionButtons = '';
+      let tipText = '';
+
+      switch (info.state) {
+        case 'NOT_UPLOADED':
+          badgeHtml = '<span class="text-xs bg-slate-100 text-slate-500 font-semibold px-2 py-0.5 rounded border border-slate-200">⚪ Chưa tải lên</span>';
+          actionButtons = `
+            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-[#003366] hover:bg-blue-900 text-white rounded text-xs font-bold shadow-sm transition flex items-center space-x-1">
+              <span>📤 Tải Lên PDF</span>
+            </button>
+          `;
+          tipText = 'Chờ RM tải lên tài liệu PDF gốc';
+          break;
+
+        case 'UPLOADING':
+          badgeHtml = '<span class="text-xs bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded animate-pulse border border-blue-200">⏳ Đang tải lên...</span>';
+          actionButtons = '<button disabled class="px-3 py-1 bg-slate-200 text-slate-400 rounded text-xs font-medium cursor-not-allowed">Đang tải...</button>';
+          tipText = 'Đang chuyển tệp lên máy chủ...';
+          break;
+
+        case 'AI_PROCESSING':
+          badgeHtml = '<span class="text-xs bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded animate-pulse border border-purple-200">🤖 GreenNode AI Đang Bóc Tách...</span>';
+          actionButtons = '<button disabled class="px-3 py-1 bg-purple-100 text-purple-700 rounded text-xs font-semibold cursor-not-allowed">Đang xử lý AI...</button>';
+          tipText = 'Mô hình GLM-5.2 / OCR đang trích xuất và đối soát trang...';
+          break;
+
+        case 'PREVIEW_READY':
+          badgeHtml = '<span class="text-xs bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded border border-amber-300">📋 Chờ RM Xác Nhận</span>';
+          actionButtons = `
+            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
+              🔄 Chọn file khác
+            </button>
+            <button onclick="openReviewModal('${docType}')" class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-bold shadow-sm transition">
+              🔍 Đối Soát & Xác Nhận
+            </button>
+          `;
+          tipText = 'AI đã bóc tách xong! Bấm để đối soát bằng chứng trang và xác nhận';
+          break;
+
+        case 'CONFLICT':
+          badgeHtml = '<span class="text-xs bg-orange-100 text-orange-800 font-bold px-2 py-0.5 rounded border border-orange-300">⚠️ Phát Hiện Xung Đột</span>';
+          actionButtons = `
+            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
+              🔄 Chọn file khác
+            </button>
+            <button onclick="openReviewModal('${docType}')" class="px-3 py-1 bg-orange-600 hover:bg-orange-700 text-white rounded text-xs font-bold shadow-sm transition">
+              ⚖️ Xử Lý Xung Đột
+            </button>
+          `;
+          tipText = 'Số liệu tài liệu xung đột với hồ sơ! Cần RM lựa chọn số liệu chuẩn';
+          break;
+
+        case 'RM_CONFIRMED':
+          badgeHtml = '<span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded border border-emerald-300">✓ Đã Xác Nhận Vào Hồ Sơ</span>';
+          actionButtons = `
+            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
+              🔄 Thay thế PDF
+            </button>
+            <button onclick="openReviewModal('${docType}')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
+              🔍 Xem Lại Bóc Tách
+            </button>
+          `;
+          tipText = 'Dữ liệu đã được khóa và đồng bộ vào Tờ trình MB07';
+          break;
+
+        case 'ERROR':
+          badgeHtml = '<span class="text-xs bg-red-100 text-red-800 font-bold px-2 py-0.5 rounded border border-red-300">❌ Lỗi Xử Lý</span>';
+          actionButtons = `
+            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-bold shadow-sm transition">
+              🔄 Thử lại
+            </button>
+          `;
+          tipText = info.errorMsg || 'Xử lý tài liệu không thành công';
+          break;
+      }
+
+      if (badgeEl) badgeEl.innerHTML = badgeHtml;
+      if (tipEl) tipEl.innerText = tipText;
+      if (actionsEl) {
+        actionsEl.innerHTML = `
+          <span id="tip-${docType}" class="text-[11px] text-slate-400 italic">${tipText}</span>
+          <div class="flex space-x-2">${actionButtons}</div>
+        `;
+      }
+      updateWorkspaceHeaderBadge();
+    }
+
+    async function handleFileSelected(docType, inputEl) {
+      if (!inputEl || !inputEl.files || inputEl.files.length === 0) return;
+      const file = inputEl.files[0];
+
+      DOC_STATES[docType].filename = file.name;
+      DOC_STATES[docType].state = 'UPLOADING';
+      updateDocCardUI(docType);
+
+      let b64 = null;
+      try {
+        b64 = await readFileAsBase64(file);
+      } catch (err) {
+        DOC_STATES[docType].state = 'ERROR';
+        DOC_STATES[docType].errorMsg = err.message;
+        updateDocCardUI(docType);
+        alert('❌ ' + err.message);
+        return;
+      }
+
+      DOC_STATES[docType].state = 'AI_PROCESSING';
+      updateDocCardUI(docType);
+
+      const endpoints = {
+        legal: '/api/preview_legal_pdf',
+        business: '/api/preview_business_pdf',
+        financial: '/api/preview_financial_pdf',
+        cic: '/api/preview_cic_pdf'
+      };
+
+      const caseSelector = document.getElementById('case-selector');
+      const cid = caseSelector ? caseSelector.value : CURRENT_CASE_ID;
+
+      try {
+        const res = await fetch(endpoints[docType], {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: b64,
+            case_id: cid
+          })
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.status !== 'success') {
+          throw new Error(data.message || 'Lỗi bóc tách tài liệu.');
+        }
+
+        DOC_STATES[docType].previewId = data.preview_id;
+        DOC_STATES[docType].previewData = data;
+
+        // Check conflicts
+        let hasConflict = false;
+        if (docType === 'legal' && data.fields) {
+          hasConflict = Object.values(data.fields).some(f => f.status === 'CONFLICT');
+        } else if (docType === 'business') {
+          hasConflict = Array.isArray(data.conflicts) && data.conflicts.length > 0;
+        } else if (docType === 'financial' && Array.isArray(data.review_table)) {
+          hasConflict = data.review_table.some(item => item.status === 'CONFLICT');
+        } else if (docType === 'cic') {
+          hasConflict = Array.isArray(data.conflicts) && data.conflicts.length > 0;
+        }
+
+        DOC_STATES[docType].state = hasConflict ? 'CONFLICT' : 'PREVIEW_READY';
+        updateDocCardUI(docType);
+
+        // Update card summary snippet with newly extracted facts
+        updateCardSummarySnippet(docType, data);
+
+        // Open RM Review Modal immediately
+        openReviewModal(docType);
+
+      } catch (err) {
+        DOC_STATES[docType].state = 'ERROR';
+        DOC_STATES[docType].errorMsg = err.message;
+        updateDocCardUI(docType);
+        alert(`❌ Lỗi bóc tách tài liệu ${docType}: ${err.message}`);
+      }
+    }
+
+    function updateCardSummarySnippet(docType, data) {
+      if (docType === 'legal' && data.fields) {
+        const f = data.fields;
+        if (f.company_name && f.company_name.value) document.getElementById('sum-legal-name').innerText = f.company_name.value;
+        if (f.tax_code && f.tax_code.value) document.getElementById('sum-legal-tax').innerText = f.tax_code.value;
+        if (f.charter_capital && f.charter_capital.value != null) {
+          const cap = Number(f.charter_capital.value);
+          document.getElementById('sum-legal-capital').innerText = isNaN(cap) ? f.charter_capital.value : cap.toLocaleString('vi-VN') + ' tr';
+        }
+        if (f.legal_rep_name && f.legal_rep_name.value) {
+          const title = (f.legal_rep_title && f.legal_rep_title.value) || 'ĐDPL';
+          document.getElementById('sum-legal-rep').innerText = `${f.legal_rep_name.value} (${title})`;
+        }
+      } else if (docType === 'financial' && Array.isArray(data.review_table)) {
+        const revItem = data.review_table.find(i => i.canonical_field === 'net_revenue');
+        const npItem = data.review_table.find(i => i.canonical_field === 'net_profit_after_tax');
+        const eqItem = data.review_table.find(i => i.canonical_field === 'equity');
+        if (revItem && revItem.extracted_value != null) document.getElementById('sum-fin-rev').innerText = Number(revItem.extracted_value).toLocaleString('vi-VN') + ' tr';
+        if (npItem && npItem.extracted_value != null) document.getElementById('sum-fin-np').innerText = Number(npItem.extracted_value).toLocaleString('vi-VN') + ' tr';
+        if (eqItem && eqItem.extracted_value != null) document.getElementById('sum-fin-equity').innerText = Number(eqItem.extracted_value).toLocaleString('vi-VN') + ' tr';
+      } else if (docType === 'business') {
+        if (data.suggested_business_model) document.getElementById('sum-biz-model').innerText = data.suggested_business_model;
+      } else if (docType === 'cic') {
+        if (data.identity_reconciliation) {
+          document.getElementById('sum-cic-status').innerText = data.identity_reconciliation.status === 'MATCH' ? '✓ Đã đối soát 100% khớp CIF' : 'Cần kiểm tra';
+        }
+      }
+    }
+
+    function openReviewModal(docType) {
+      CURRENT_REVIEW_DOCTYPE = docType;
+      const modal = document.getElementById('modal-doc-review');
+      const titleEl = document.getElementById('modal-review-title');
+      const subEl = document.getElementById('modal-review-subtitle');
+      const btn = document.getElementById('btn-confirm-review');
+
+      const titles = {
+        legal: '🏛️ Đối Soát Hồ Sơ Pháp Lý & ĐKKD',
+        business: '🏭 Đối Soát Mô Hình Kinh Doanh & Chuỗi Cung Ứng',
+        financial: '📈 Đối Soát Báo Cáo Tài Chính Kiểm Toán 3 Năm',
+        cic: '🏦 Đối Soát Báo Cáo Tín Dụng CIC Chi Tiết'
+      };
+
+      if (titleEl) titleEl.innerText = titles[docType] || '📋 Đối Soát Dữ Liệu Bóc Tách GreenNode AI';
+      if (subEl) subEl.innerText = `Kiểm tra bằng chứng trích xuất từ tệp '${DOC_STATES[docType].filename || 'PDF'}' trước khi xác nhận vào hồ sơ MB07`;
+
+      if (btn) {
+        if (!DOC_STATES[docType].previewId && DOC_STATES[docType].state === 'RM_CONFIRMED') {
+          btn.innerHTML = '<span>✓ Dữ Liệu Đã Xác Nhận</span>';
+          btn.disabled = true;
+        } else {
+          btn.innerHTML = '<span>✓ Xác Nhận Vào Hồ Sơ (Commit)</span>';
+          btn.disabled = false;
+        }
+      }
+
+      renderReviewBody(docType, DOC_STATES[docType].previewData);
+      modal.classList.remove('hidden');
+    }
+
+    function closeReviewModal() {
+      document.getElementById('modal-doc-review').classList.add('hidden');
+      CURRENT_REVIEW_DOCTYPE = null;
+    }
+
+    function renderReviewBody(docType, data) {
+      const body = document.getElementById('modal-review-body');
+      if (!body) return;
+
+      if (!data) {
+        body.innerHTML = `
+          <div class="p-6 text-center text-slate-500 bg-slate-50 rounded-xl border border-slate-200">
+            <div class="text-sm font-semibold text-slate-700">ℹ️ Dữ liệu hồ sơ mẫu chuẩn (Preloaded Demo).</div>
+            <div class="text-xs text-slate-400 mt-1">Để kiểm tra tính năng trích xuất AI trực tiếp, hãy bấm "Thay thế PDF" và nạp tài liệu PDF thực tế.</div>
+          </div>
+        `;
+        return;
+      }
+
+      let html = '';
+      if (docType === 'legal') {
+        const fields = data.fields || {};
+        const fieldLabels = {
+          company_name: 'Tên Doanh Nghiệp',
+          short_name: 'Tên Viết Tắt',
+          tax_code: 'Mã Số Thuế',
+          address: 'Địa Chỉ Đăng Ký',
+          charter_capital: 'Vốn Điều Lệ',
+          legal_rep_name: 'Người Đại Diện Pháp Luật',
+          legal_rep_title: 'Chức Danh ĐDPL'
+        };
+
+        const routing = data.routing || {};
+        html += `
+          <div class="p-3 bg-blue-50/70 border border-blue-200 rounded-lg flex items-center justify-between text-xs">
+            <div>
+              <span class="font-bold text-blue-900">Tài liệu:</span> ${data.filename || 'PDF'}
+              <span class="text-slate-400 mx-1.5">|</span>
+              <span class="font-bold text-blue-900">Trang:</span> ${routing.page_count || 1}
+              <span class="text-slate-400 mx-1.5">|</span>
+              <span class="font-bold text-blue-900">Công nghệ:</span> GreenNode Document AI (${routing.provider || 'OCR'})
+            </div>
+            <span class="px-2 py-0.5 bg-blue-100 text-blue-800 font-bold rounded">No Evidence → No Fact</span>
+          </div>
+
+          <table class="w-full text-left border border-slate-200 rounded-lg overflow-hidden text-xs">
+            <thead class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+              <tr>
+                <th class="p-2.5 w-1/4">Trường Thông Tin</th>
+                <th class="p-2.5 w-1/4">Giá Trị Bóc Tách</th>
+                <th class="p-2.5 w-1/12 text-center">Trang</th>
+                <th class="p-2.5 w-1/4">Bằng Chứng Trích Dẫn</th>
+                <th class="p-2.5 w-1/6">Trạng Thái / Xử Lý</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-200 bg-white">
+        `;
+
+        for (const [k, f] of Object.entries(fields)) {
+          const lbl = fieldLabels[k] || k;
+          const val = f.value != null ? (k === 'charter_capital' && typeof f.value === 'number' ? f.value.toLocaleString('vi-VN') + ' tr' : f.value) : '<span class="text-slate-400 italic">Không tìm thấy</span>';
+          const pg = f.page != null ? `Trang ${f.page}` : '—';
+          const ev = f.evidence ? `<div class="italic text-slate-600 bg-slate-50 p-1 rounded text-[11px] max-h-16 overflow-y-auto">"${f.evidence}"</div>` : '—';
+
+          let statusBadge = '';
+          let resolutionControl = '';
+
+          if (f.status === 'CONFLICT') {
+            statusBadge = '<span class="text-[10px] bg-orange-100 text-orange-800 font-bold px-1.5 py-0.5 rounded border border-orange-200">XUNG ĐỘT</span>';
+            resolutionControl = `
+              <div class="mt-1 space-y-1">
+                <div class="text-[10px] text-orange-700 font-medium">${f.conflict_note || ''}</div>
+                <select id="res-legal-${k}" class="w-full text-[11px] p-1 bg-orange-50 border border-orange-300 rounded focus:ring-1 focus:ring-orange-500 font-medium">
+                  <option value="USE_EXTRACTED">✓ Lấy số liệu mới bóc tách</option>
+                  <option value="KEEP_EXISTING">✕ Giữ số liệu hồ sơ hiện tại</option>
+                </select>
+              </div>
+            `;
+          } else if (f.status === 'WARNING') {
+            statusBadge = `<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-200" title="${f.warning_reason || ''}">CẢNH BÁO</span>`;
+          } else if (f.status === 'MISSING') {
+            statusBadge = '<span class="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded border border-slate-200">CHƯA CÓ</span>';
+          } else {
+            statusBadge = '<span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded border border-emerald-200">✓ XÁC THỰC</span>';
+          }
+
+          html += `
+            <tr class="hover:bg-slate-50">
+              <td class="p-2.5 font-semibold text-slate-800">${lbl}</td>
+              <td class="p-2.5 font-bold text-[#003366]">${val}</td>
+              <td class="p-2.5 text-center font-medium text-slate-500">${pg}</td>
+              <td class="p-2.5">${ev}</td>
+              <td class="p-2.5">${statusBadge}${resolutionControl}</td>
+            </tr>
+          `;
+        }
+
+        html += `
+            </tbody>
+          </table>
+        `;
+
+      } else if (docType === 'financial') {
+        const periods = data.periods || [];
+        const reviewTable = data.review_table || [];
+        const ratios = data.calculated_ratios || {};
+        const warnings = data.audit_warnings || [];
+
+        html += `
+          <div class="p-3 bg-blue-50/70 border border-blue-200 rounded-lg flex items-center justify-between text-xs">
+            <div>
+              <span class="font-bold text-blue-900">Tài liệu BCTC:</span> ${data.filename || 'BCTC.pdf'}
+              <span class="text-slate-400 mx-1.5">|</span>
+              <span class="font-bold text-blue-900">Các năm trích xuất:</span> ${periods.join(', ') || 'N/A'}
+            </div>
+            <span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded">Python Grounding Audit: PASSED</span>
+          </div>
+        `;
+
+        if (warnings.length > 0) {
+          html += `
+            <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs space-y-1">
+              <div class="font-bold text-amber-800">⚠️ Lưu ý đối soát số liệu BCTC:</div>
+              <ul class="list-disc list-inside text-amber-700 text-[11px]">${warnings.map(w => `<li>${w}</li>`).join('')}</ul>
+            </div>
+          `;
+        }
+
+        html += `
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border border-slate-200 rounded-lg text-xs">
+              <thead class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                <tr>
+                  <th class="p-2 w-12 text-center">Năm</th>
+                  <th class="p-2 w-1/4">Khoản Mục BCTC</th>
+                  <th class="p-2 w-1/5">Số Liệu Bóc Tách</th>
+                  <th class="p-2 w-12 text-center">Trang</th>
+                  <th class="p-2 w-1/4">Đoạn Trích Bằng Chứng</th>
+                  <th class="p-2 w-1/6">Trạng Thái</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200 bg-white">
+        `;
+
+        reviewTable.forEach(item => {
+          const valNum = item.extracted_value != null ? Number(item.extracted_value).toLocaleString('vi-VN') + ' ' + (item.unit || 'tr') : (item.raw_value || '—');
+          const pg = item.page != null ? `Trang ${item.page}` : '—';
+          const ev = item.evidence ? `<div class="italic text-slate-600 bg-slate-50 p-1 rounded text-[11px] max-h-12 overflow-y-auto">"${item.evidence}"</div>` : '—';
+
+          let statusBadge = '';
+          let resControl = '';
+          if (item.status === 'CONFLICT') {
+            statusBadge = '<span class="text-[10px] bg-orange-100 text-orange-800 font-bold px-1.5 py-0.5 rounded">XUNG ĐỘT</span>';
+            resControl = `
+              <div class="mt-1">
+                <div class="text-[10px] text-orange-700">${item.conflict_note || ''}</div>
+                <select id="res-fin-${item.canonical_field}-${item.year}" class="w-full text-[10px] p-1 bg-orange-50 border border-orange-300 rounded font-medium">
+                  <option value="USE_EXTRACTED">✓ Dùng số liệu BCTC</option>
+                  <option value="KEEP_EXISTING">✕ Giữ số liệu cũ</option>
+                </select>
+              </div>
+            `;
+          } else if (item.status === 'WARNING') {
+            statusBadge = '<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">CẢNH BÁO</span>';
+          } else {
+            statusBadge = '<span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">✓ EXTRACTED</span>';
+          }
+
+          html += `
+            <tr class="hover:bg-slate-50">
+              <td class="p-2 text-center font-bold text-slate-600">${item.year}</td>
+              <td class="p-2 font-medium text-slate-800">${item.item_name || item.canonical_field}</td>
+              <td class="p-2 font-bold text-[#003366]">${valNum}</td>
+              <td class="p-2 text-center text-slate-500">${pg}</td>
+              <td class="p-2">${ev}</td>
+              <td class="p-2">${statusBadge}${resControl}</td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+
+        if (Object.keys(ratios).length > 0) {
+          html += `
+            <div class="p-3 bg-emerald-50/60 border border-emerald-200 rounded-lg space-y-2">
+              <div class="font-bold text-emerald-900 text-xs flex items-center space-x-1.5">
+                <span>🧮</span>
+                <span>Chỉ Số Tài Chính Tính Toán Tự Động (Python Verification Engine - 100% Deterministic):</span>
+              </div>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+                ${Object.entries(ratios).map(([k, v]) => `
+                  <div class="bg-white p-2 rounded border border-emerald-100 shadow-sm">
+                    <div class="text-[10px] text-slate-500">${k}</div>
+                    <div class="font-bold text-slate-800 text-sm mt-0.5">${typeof v === 'number' ? v.toFixed(2) : v}</div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          `;
+        }
+
+      } else if (docType === 'business') {
+        const reviewTable = data.review_table || [];
+        const suggestedBm = data.suggested_business_model || 'THUONG_MAI';
+
+        html += `
+          <div class="p-3 bg-blue-50/70 border border-blue-200 rounded-lg space-y-2 text-xs">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="font-bold text-blue-900">Tài liệu:</span> ${data.filename || 'Bao_Cao_Thuong_Nien.pdf'}
+              </div>
+              <span class="px-2 py-0.5 bg-blue-100 text-blue-800 font-bold rounded">GreenNode Business AI</span>
+            </div>
+            <div class="flex items-center space-x-2 pt-1">
+              <label class="font-bold text-slate-700">Mô hình kinh doanh được AI nhận diện:</label>
+              <select id="bm-override" class="p-1 border border-slate-300 rounded font-semibold bg-white text-[#003366]">
+                <option value="THUONG_MAI" ${suggestedBm === 'THUONG_MAI' ? 'selected' : ''}>Thương mại Phân phối</option>
+                <option value="SAN_XUAT" ${suggestedBm === 'SAN_XUAT' ? 'selected' : ''}>Sản xuất</option>
+                <option value="SAN_XUAT_VA_THUONG_MAI" ${suggestedBm === 'SAN_XUAT_VA_THUONG_MAI' ? 'selected' : ''}>Sản xuất & Thương mại</option>
+                <option value="DICH_VU" ${suggestedBm === 'DICH_VU' ? 'selected' : ''}>Dịch vụ</option>
+                <option value="XAY_DUNG_BAT_DONG_SAN" ${suggestedBm === 'XAY_DUNG_BAT_DONG_SAN' ? 'selected' : ''}>Xây dựng & Bất động sản</option>
+              </select>
+            </div>
+          </div>
+        `;
+
+        html += `
+          <div class="p-2.5 bg-slate-50 border border-slate-200 rounded-lg flex items-center space-x-2 text-xs">
+            <input type="checkbox" id="check-business-ack" checked class="w-4 h-4 text-blue-600 rounded">
+            <label for="check-business-ack" class="font-semibold text-slate-800">
+              RM xác nhận hồ sơ doanh nghiệp trùng khớp với khách hàng thẩm định.
+            </label>
+          </div>
+        `;
+
+        html += `
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border border-slate-200 rounded-lg text-xs">
+              <thead class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                <tr>
+                  <th class="p-2 w-1/4">Hạng Mục</th>
+                  <th class="p-2 w-1/3">Nội Dung Trích Xuất</th>
+                  <th class="p-2 w-12 text-center">Trang</th>
+                  <th class="p-2 w-1/4">Đoạn Trích Bằng Chứng</th>
+                  <th class="p-2 w-20 text-center">Trạng Thái</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200 bg-white">
+        `;
+
+        reviewTable.forEach(item => {
+          const pg = item.page != null ? `Trang ${item.page}` : '—';
+          const ev = item.evidence ? `<div class="italic text-slate-600 bg-slate-50 p-1 rounded text-[11px] max-h-12 overflow-y-auto">"${item.evidence}"</div>` : '—';
+          const statusBadge = item.grounding_status === 'VERIFIED' ?
+            '<span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">✓ XÁC THỰC</span>' :
+            '<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">CHỜ XÁC MINH</span>';
+
+          html += `
+            <tr class="hover:bg-slate-50">
+              <td class="p-2 font-semibold text-slate-800">${item.label || item.canonical_path}</td>
+              <td class="p-2 text-slate-700">${item.value_raw || '—'}</td>
+              <td class="p-2 text-center text-slate-500">${pg}</td>
+              <td class="p-2">${ev}</td>
+              <td class="p-2 text-center">${statusBadge}</td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+
+      } else if (docType === 'cic') {
+        const idRecon = data.identity_reconciliation || {};
+        const reviewTable = data.review_table || [];
+
+        html += `
+          <div class="p-3 bg-blue-50/70 border border-blue-200 rounded-lg space-y-2 text-xs">
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="font-bold text-blue-900">Tài liệu:</span> ${data.filename || 'CIC.pdf'}
+              </div>
+              <span class="px-2 py-0.5 bg-blue-100 text-blue-800 font-bold rounded">GreenNode CIC AI</span>
+            </div>
+            <div class="flex items-center space-x-2 text-xs">
+              <span class="font-bold text-slate-700">Đối soát định danh CIF:</span>
+              <span class="px-2 py-0.5 rounded font-bold ${idRecon.status === 'MATCH' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
+                ${idRecon.status === 'MATCH' ? '✓ TRÙNG KHỚP MST/TÊN DOANH NGHIỆP' : (idRecon.message || 'CẦN KIỂM TRA')}
+              </span>
+            </div>
+          </div>
+        `;
+
+        html += `
+          <div class="overflow-x-auto">
+            <table class="w-full text-left border border-slate-200 rounded-lg text-xs">
+              <thead class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                <tr>
+                  <th class="p-2 w-8 text-center">STT</th>
+                  <th class="p-2 w-1/4">Tổ Chức Tín Dụng</th>
+                  <th class="p-2 w-1/5">Dư Nợ Ngắn Hạn</th>
+                  <th class="p-2 w-1/5">Tổng Dư Nợ</th>
+                  <th class="p-2 w-1/6">Nhóm Nợ</th>
+                  <th class="p-2 w-12 text-center">Trang</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-200 bg-white">
+        `;
+
+        reviewTable.forEach(item => {
+          const isMsb = item.is_msb;
+          const rowClass = isMsb ? 'bg-red-50/40 font-semibold' : 'hover:bg-slate-50';
+          const bankNameBadge = isMsb ? `<span class="text-red-700 font-bold">🔴 ${item.bank_name}</span>` : item.bank_name;
+
+          html += `
+            <tr class="${rowClass}">
+              <td class="p-2 text-center">${item.stt || '—'}</td>
+              <td class="p-2 font-medium">${bankNameBadge}</td>
+              <td class="p-2 font-bold text-slate-800">${item.short_term_debt_vnd || '—'}</td>
+              <td class="p-2 font-bold text-[#003366]">${item.total_debt_printed || '—'}</td>
+              <td class="p-2"><span class="px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded text-[10px]">${item.debt_group || 'Nhóm 1'}</span></td>
+              <td class="p-2 text-center text-slate-500">${item.page ? 'Trang ' + item.page : '—'}</td>
+            </tr>
+          `;
+        });
+
+        html += `
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      body.innerHTML = html;
+    }
+
+    function confirmCurrentReview() {
+      if (CURRENT_REVIEW_DOCTYPE) {
+        confirmDocPreview(CURRENT_REVIEW_DOCTYPE);
+      }
+    }
+
+    async function confirmDocPreview(docType) {
+      const info = DOC_STATES[docType];
+      if (!info.previewId) {
+        alert('Không có bản xem trước tài liệu hợp lệ để xác nhận.');
+        return;
+      }
+
+      const btn = document.getElementById('btn-confirm-review');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳ Đang ghi nhận vào hồ sơ MB07...</span>';
+      }
+
+      const caseSelector = document.getElementById('case-selector');
+      const cid = caseSelector ? caseSelector.value : CURRENT_CASE_ID;
+
+      const endpoints = {
+        legal: '/api/confirm_legal_preview',
+        business: '/api/confirm_business_preview',
+        financial: '/api/confirm_financial_preview',
+        cic: '/api/confirm_cic_preview'
+      };
+
+      let payload = {
+        preview_id: info.previewId,
+        case_id: cid
+      };
+
+      if (docType === 'legal') {
+        const resolutions = {};
+        if (info.previewData && info.previewData.fields) {
+          for (const [k, f] of Object.entries(info.previewData.fields)) {
+            const sel = document.getElementById('res-legal-' + k);
+            if (sel) resolutions[f.canonical_path] = sel.value;
+          }
+        }
+        if (Object.keys(resolutions).length > 0) payload.resolutions = resolutions;
+      } else if (docType === 'financial') {
+        const resolutions = {};
+        if (info.previewData && Array.isArray(info.previewData.review_table)) {
+          info.previewData.review_table.forEach(item => {
+            const sel = document.getElementById(`res-fin-${item.canonical_field}-${item.year}`);
+            if (sel) resolutions[`section_d.${item.canonical_field}[${item.year}]`] = sel.value;
+          });
+        }
+        if (Object.keys(resolutions).length > 0) payload.resolutions = resolutions;
+      } else if (docType === 'business') {
+        const bmEl = document.getElementById('bm-override');
+        if (bmEl) payload.business_model_override = bmEl.value;
+        const ackEl = document.getElementById('check-business-ack');
+        payload.identity_acknowledged = ackEl ? ackEl.checked : true;
+      }
+
+      try {
+        const res = await fetch(endpoints[docType], {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (!res.ok || data.status !== 'success') {
+          throw new Error(data.message || 'Lỗi xác nhận tài liệu.');
+        }
+
+        DOC_STATES[docType].state = 'RM_CONFIRMED';
+        updateDocCardUI(docType);
+        closeReviewModal();
+        await loadCaseData();
+
+        // Update hero banner badge to LIVE AI DATA
+        const badge = document.getElementById('case-source-badge');
+        if (badge) {
+          badge.innerText = 'LIVE AI DATA (RM CONFIRMED)';
+          badge.className = 'text-xs bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full font-bold border border-emerald-400/30 whitespace-nowrap';
+        }
+
+        alert(`🎉 Đã xác nhận thành công tài liệu '${info.filename}' vào hồ sơ MB07!\nDữ liệu đã được cập nhật sang Bảng Đối Soát và Tờ Trình.`);
+
+      } catch (err) {
+        alert('❌ Lỗi xác nhận: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>✓ Xác Nhận Vào Hồ Sơ (Commit)</span>';
+        }
+      }
+    }
+
+    function openNewCaseModal() {
+      document.getElementById('new-case-name').value = '';
+      document.getElementById('new-case-short-name').value = '';
+      document.getElementById('new-case-tax-code').value = '';
+      document.getElementById('new-case-capital').value = '';
+      document.getElementById('new-case-limit').value = '';
+      document.getElementById('new-case-address').value = '';
+      document.getElementById('modal-new-case').classList.remove('hidden');
+    }
+
+    function closeNewCaseModal() {
+      document.getElementById('modal-new-case').classList.add('hidden');
+    }
+
+    async function submitNewCase() {
+      const name = document.getElementById('new-case-name').value.trim();
+      const short_name = document.getElementById('new-case-short-name').value.trim();
+      const tax_code = document.getElementById('new-case-tax-code').value.trim();
+      const charter_capital = parseFloat(document.getElementById('new-case-capital').value) || 0;
+      const proposed_limit = parseFloat(document.getElementById('new-case-limit').value) || 0;
+      const address = document.getElementById('new-case-address').value.trim();
+      const business_model = document.getElementById('new-case-business-model').value;
+
+      if (!name || !short_name || !tax_code) {
+        alert('⚠️ Vui lòng nhập đầy đủ: Tên Doanh nghiệp, Tên viết tắt và Mã số thuế.');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/new_case', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            short_name,
+            tax_code,
+            charter_capital,
+            proposed_limit,
+            address,
+            business_model
+          })
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          const cid = data.case_id;
+          CURRENT_CASE_ID = cid;
+
+          // Add to case selector if not exists
+          const selector = document.getElementById('case-selector');
+          let opt = selector.querySelector(`option[value="${cid}"]`);
+          if (!opt) {
+            opt = document.createElement('option');
+            opt.value = cid;
+            opt.innerText = `${short_name} - ${name}`;
+            selector.appendChild(opt);
+          }
+          selector.value = cid;
+
+          // Reset doc states to NOT_UPLOADED for this new case
+          ['legal', 'business', 'financial', 'cic'].forEach(k => {
+            DOC_STATES[k] = {
+              state: 'NOT_UPLOADED',
+              filename: '',
+              previewId: null,
+              previewData: null
+            };
+            updateDocCardUI(k);
+          });
+
+          // Reset card summaries
+          document.getElementById('sum-legal-name').innerText = name;
+          document.getElementById('sum-legal-tax').innerText = tax_code;
+          document.getElementById('sum-legal-capital').innerText = charter_capital > 0 ? charter_capital.toLocaleString('vi-VN') + ' tr' : 'Chưa cập nhật';
+          document.getElementById('sum-legal-rep').innerText = 'Chưa cập nhật (Chờ nạp ĐKKD)';
+
+          document.getElementById('sum-biz-model').innerText = business_model;
+          document.getElementById('sum-biz-suppliers').innerText = 'Chưa nạp hồ sơ kinh doanh';
+          document.getElementById('sum-biz-customers').innerText = 'Chưa nạp hồ sơ kinh doanh';
+
+          document.getElementById('sum-fin-auditor').innerText = 'Chưa nạp BCTC';
+          document.getElementById('sum-fin-rev').innerText = 'Chưa có số liệu';
+          document.getElementById('sum-fin-np').innerText = 'Chưa có số liệu';
+          document.getElementById('sum-fin-equity').innerText = charter_capital > 0 ? charter_capital.toLocaleString('vi-VN') + ' tr' : 'Chưa có số liệu';
+
+          document.getElementById('sum-cic-date').innerText = 'Chưa tra cứu';
+          document.getElementById('sum-cic-status').innerText = 'Chưa có dữ liệu CIC';
+          document.getElementById('sum-cic-msb').innerText = '0 tr';
+          document.getElementById('sum-cic-other').innerText = 'Chưa có dữ liệu';
+
+          closeNewCaseModal();
+          await loadCaseData();
+          switchTab('tab-dashboard');
+          alert(`🎉 Đã khởi tạo hồ sơ thành công cho '${short_name}'!\nHãy chuyển sang tab 'Không Gian Tài Liệu' để tải lên các tài liệu PDF gốc.`);
+        } else {
+          alert('Lỗi khởi tạo: ' + (data.message || 'Không xác định'));
+        }
+      } catch (e) {
+        alert('Lỗi kết nối máy chủ: ' + e.message);
+      }
+    }
+
+    async function saveSectionA() {
+      const payload = {
+        section: "A",
+        unit_name: document.getElementById('rm-unit-name').value,
+        rm_name: document.getElementById('rm-rm-name').value,
+        rm_phone: document.getElementById('rm-rm-phone').value,
+        manager_name: document.getElementById('rm-manager-name').value,
+        authority: document.getElementById('rm-authority').value
+      };
+      try {
+        const res = await fetch('/api/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          alert('✅ Đã lưu thông tin Pháp lý & ĐVKD Phần A thành công!');
+        } else {
+          alert('Lỗi lưu Phần A: ' + data.message);
+        }
+      } catch (e) {
+        alert('Lỗi lưu Phần A: ' + e.message);
+      }
+    }
+
+    async function saveSectionB() {
+      const payload = {
+        section: "B",
+        total_limit: parseFloat(document.getElementById('rm-total-limit').value) || 0,
+        loan_limit: parseFloat(document.getElementById('rm-loan-limit').value) || 0,
+        guarantee_limit: parseFloat(document.getElementById('rm-guar-limit').value) || 0,
+        collateral: document.getElementById('rm-collateral').value,
+        purpose: document.getElementById('rm-purpose').value
+      };
+      try {
+        const res = await fetch('/api/save', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.status === 'success') {
+          alert('✅ Đã lưu đề xuất cấp tín dụng Phần B thành công!');
+          loadCaseData();
+        } else {
+          alert('Lỗi lưu Phần B: ' + data.message);
+        }
+      } catch (e) {
+        alert('Lỗi lưu Phần B: ' + e.message);
+      }
+    }
+
     async function loadCaseData() {
       try {
         const res = await fetch('/api/case');
         const data = await res.json();
         
+        CURRENT_CASE_ID = data.id || 'PSD';
         const cust = data.customer || {};
         const b = data.section_b || {};
         const d = data.section_d || {};
         const e = data.section_e || {};
-        
-        document.getElementById('dash-cust-name').innerText = `${cust.short_name || cust.name} (CIF: ${cust.cif || 'DEMO001'})`;
-        document.getElementById('dash-cust-rating').innerText = `Định hạng MSB: Hạng ${cust.rating_grade || 'AAA'} (${cust.rating_score || 95}đ)`;
-        document.getElementById('dash-total-limit').innerText = `${(b.total_limit || 700000).toLocaleString('vi-VN')} triệu VND`;
-        document.getElementById('dash-loan-limit').innerText = `Cho vay: ${(b.loan_limit || 250000).toLocaleString('vi-VN')} tr | Bảo lãnh: ${(b.guarantee_limit || 30000).toLocaleString('vi-VN')} tr`;
-        
-        const rev2025 = (d.net_revenue && d.net_revenue.length) ? d.net_revenue[d.net_revenue.length - 1] : 7819398;
-        const np2025 = (d.net_profit_after_tax && d.net_profit_after_tax.length) ? d.net_profit_after_tax[d.net_profit_after_tax.length - 1] : 134201;
-        document.getElementById('dash-rev-2025').innerText = `${rev2025.toLocaleString('vi-VN')} triệu VND`;
-        document.getElementById('dash-np-2025').innerText = `LNST: ${np2025.toLocaleString('vi-VN')} tr`;
-        
-        document.getElementById('dash-cic-status').innerText = e.history_status || '100% Nhóm 1';
-        document.getElementById('dash-msb-out').innerText = `Dư nợ tại MSB: ${(e.msb_outstanding || 499999).toLocaleString('vi-VN')} triệu VND`;
+        const rm = data.rm_metadata || {};
 
-        document.getElementById('dash-tax-code').innerText = cust.tax_code || '0100000000';
-        document.getElementById('dash-legal-rep').innerText = `${cust.legal_rep_name || 'Đại diện Demo'} (${cust.legal_rep_title || 'Tổng Giám đốc'})`;
-        document.getElementById('dash-capital').innerText = `${(cust.charter_capital || 518279).toLocaleString('vi-VN')} triệu VND`;
-        document.getElementById('dash-address').innerText = cust.address || 'TP. Hồ Chí Minh';
-        
-        document.getElementById('dash-purpose').innerText = b.loan_purpose || 'Bổ sung vốn lưu động kinh doanh';
-        document.getElementById('dash-collat').innerText = b.collateral_type || 'Tín chấp 100%';
-        document.getElementById('dash-cashflow').innerText = `${b.cashflow_commitment_pct || 25}% Doanh thu qua tài khoản MSB`;
+        // Header badge
+        const badge = document.getElementById('case-source-badge');
+        if (badge) {
+          const isDemo = ['PSD', 'GAS_SOUTH', 'PHYTOPHARMA'].includes(CURRENT_CASE_ID);
+          const hasLiveConfirmed = Object.values(DOC_STATES).some(s => s.state === 'RM_CONFIRMED' && s.previewId !== null);
+          if (hasLiveConfirmed) {
+            badge.innerText = 'LIVE AI DATA (RM CONFIRMED)';
+            badge.className = 'text-xs bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full font-bold border border-emerald-400/30 whitespace-nowrap';
+          } else if (isDemo) {
+            badge.innerText = 'DEMO DATA (PRELOADED)';
+            badge.className = 'text-xs bg-amber-500/20 text-amber-300 px-3 py-1 rounded-full font-bold border border-amber-400/30 whitespace-nowrap';
+          } else {
+            badge.innerText = 'HỒ SƠ MỚI (CHỜ NẠP TÀI LIỆU)';
+            badge.className = 'text-xs bg-blue-500/20 text-blue-300 px-3 py-1 rounded-full font-bold border border-blue-400/30 whitespace-nowrap';
+          }
+        }
 
-        // Update form fields
-        if (document.getElementById('rm-total-limit')) document.getElementById('rm-total-limit').value = b.total_limit || 700000;
-        if (document.getElementById('rm-loan-limit')) document.getElementById('rm-loan-limit').value = b.loan_limit || 250000;
-        if (document.getElementById('rm-guar-limit')) document.getElementById('rm-guar-limit').value = b.guarantee_limit || 30000;
+        // Dashboard fields with empty-state handling
+        const custTitle = `${cust.short_name || cust.name || 'DOANH NGHIỆP MỚI'} (CIF: ${cust.cif || 'Chưa cấp'})`;
+        document.getElementById('dash-cust-name').innerText = custTitle;
+        
+        if (cust.rating_grade) {
+          document.getElementById('dash-cust-rating').innerText = `Định hạng MSB: Hạng ${cust.rating_grade} (${cust.rating_score || 0}đ)`;
+        } else {
+          document.getElementById('dash-cust-rating').innerText = `Định hạng MSB: Chưa xếp hạng (Chờ thẩm định)`;
+        }
+
+        const totalLimit = b.total_limit || 0;
+        document.getElementById('dash-total-limit').innerText = `${totalLimit.toLocaleString('vi-VN')} triệu VND`;
+        document.getElementById('dash-loan-limit').innerText = `Cho vay: ${(b.loan_limit || 0).toLocaleString('vi-VN')} tr | Bảo lãnh: ${(b.guarantee_limit || 0).toLocaleString('vi-VN')} tr`;
+        
+        const revArr = d.net_revenue || [];
+        const npArr = d.net_profit_after_tax || [];
+        const hasFin = revArr.length > 0 && revArr[revArr.length - 1] > 0;
+        
+        if (hasFin) {
+          const revLast = revArr[revArr.length - 1];
+          const npLast = npArr.length > 0 ? npArr[npArr.length - 1] : 0;
+          document.getElementById('dash-rev-2025').innerText = `${revLast.toLocaleString('vi-VN')} triệu VND`;
+          document.getElementById('dash-np-2025').innerText = `LNST: ${npLast.toLocaleString('vi-VN')} tr`;
+        } else {
+          document.getElementById('dash-rev-2025').innerText = 'Chưa nạp BCTC';
+          document.getElementById('dash-np-2025').innerText = 'LNST: Chưa có số liệu';
+        }
+
+        document.getElementById('dash-cic-status').innerText = e.history_status || 'Chưa tra cứu CIC';
+        document.getElementById('dash-msb-out').innerText = `Dư nợ tại MSB: ${(e.msb_outstanding || 0).toLocaleString('vi-VN')} triệu VND`;
+
+        document.getElementById('dash-tax-code').innerText = cust.tax_code || 'Chưa có MST';
+        document.getElementById('dash-legal-rep').innerText = cust.legal_rep_name ? `${cust.legal_rep_name} (${cust.legal_rep_title || 'Đại diện'})` : 'Chưa cập nhật';
+        document.getElementById('dash-capital').innerText = cust.charter_capital ? `${cust.charter_capital.toLocaleString('vi-VN')} triệu VND` : 'Chưa cập nhật';
+        document.getElementById('dash-address').innerText = cust.address || 'Chưa cập nhật';
+        
+        document.getElementById('dash-purpose').innerText = b.loan_purpose || 'Chưa có thông tin';
+        document.getElementById('dash-collat').innerText = b.collateral_type || 'Chưa xác định';
+        document.getElementById('dash-cashflow').innerText = b.cashflow_commitment_pct ? `${b.cashflow_commitment_pct}% Doanh thu qua tài khoản MSB` : 'Chưa cam kết';
+
+        // Update form inputs for Section A
+        if (document.getElementById('rm-unit-name')) document.getElementById('rm-unit-name').value = rm.unit_name || '';
+        if (document.getElementById('rm-rm-name')) document.getElementById('rm-rm-name').value = rm.rm_name || '';
+        if (document.getElementById('rm-rm-phone')) document.getElementById('rm-rm-phone').value = rm.rm_phone || '';
+        if (document.getElementById('rm-manager-name')) document.getElementById('rm-manager-name').value = rm.manager_name || '';
+        if (document.getElementById('rm-authority')) document.getElementById('rm-authority').value = rm.approval_authority || 'HĐTDCC';
+
+        // Update form inputs for Section B
+        if (document.getElementById('rm-total-limit')) document.getElementById('rm-total-limit').value = b.total_limit || 0;
+        if (document.getElementById('rm-loan-limit')) document.getElementById('rm-loan-limit').value = b.loan_limit || 0;
+        if (document.getElementById('rm-guar-limit')) document.getElementById('rm-guar-limit').value = b.guarantee_limit || 0;
         if (document.getElementById('rm-collateral')) document.getElementById('rm-collateral').value = b.collateral_type || '';
         if (document.getElementById('rm-purpose')) document.getElementById('rm-purpose').value = b.loan_purpose || '';
 
@@ -1659,7 +2737,7 @@ HTML_PAGE = """<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ case_id: cid })
         });
-        loadCaseData();
+        await loadCaseData();
         if (CURRENT_ACTIVE_TAB === 'tab-committee') loadCommitteeCards();
         alert(`⚡ Đã nạp lại dữ liệu demo chuẩn cho hồ sơ '${cid}'!`);
       } catch (e) {
@@ -1676,7 +2754,21 @@ HTML_PAGE = """<!DOCTYPE html>
         });
         const data = await res.json();
         if (data.status === 'success') {
-          loadCaseData();
+          CURRENT_CASE_ID = caseId;
+          const isDemo = ['PSD', 'GAS_SOUTH', 'PHYTOPHARMA'].includes(caseId);
+          if (isDemo) {
+            const prefix = caseId === 'PSD' ? 'PSD' : (caseId === 'GAS_SOUTH' ? 'GasSouth' : 'Phytopharma');
+            DOC_STATES.legal = { state: 'RM_CONFIRMED', filename: `Giay_Phep_DKKD_${prefix}.pdf`, previewId: null, previewData: null };
+            DOC_STATES.business = { state: 'RM_CONFIRMED', filename: `Bao_Cao_Thuong_Nien_${prefix}.pdf`, previewId: null, previewData: null };
+            DOC_STATES.financial = { state: 'RM_CONFIRMED', filename: `BCTC_Kiem_Toan_${prefix}_2025.pdf`, previewId: null, previewData: null };
+            DOC_STATES.cic = { state: 'RM_CONFIRMED', filename: `Bao_Cao_CIC_${prefix}_2025.pdf`, previewId: null, previewData: null };
+          } else {
+            ['legal', 'business', 'financial', 'cic'].forEach(k => {
+              DOC_STATES[k] = { state: 'NOT_UPLOADED', filename: '', previewId: null, previewData: null };
+            });
+          }
+          ['legal', 'business', 'financial', 'cic'].forEach(k => updateDocCardUI(k));
+          await loadCaseData();
           if (CURRENT_ACTIVE_TAB === 'tab-committee') loadCommitteeCards();
         }
       } catch (e) {
@@ -1741,7 +2833,10 @@ HTML_PAGE = """<!DOCTYPE html>
       }
     }
 
-    window.onload = loadCaseData;
+    window.onload = function() {
+      loadCaseData();
+      updateWorkspaceHeaderBadge();
+    };
   </script>
 </body>
 </html>
