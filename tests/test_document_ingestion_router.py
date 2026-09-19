@@ -119,9 +119,9 @@ def test_scanned_pdf_routes_to_ocr():
     assert engine.call_count == 2
 
 
-def test_mixed_pdf_routes_full_document_to_ocr():
+def test_mixed_pdf_routes_to_hybrid():
     """Tệp mixed_blank.pdf (trang 1 digital, trang 2 trắng/ảnh):
-    PDFTextIngestor gặp lỗi ở trang 2 -> Router gửi TOÀN BỘ tài liệu qua OCR (document-level fallback).
+    Patch 1.5A: Router bóc tách trang 1 bằng pypdf và CHỈ gửi trang 2 qua OCR (hybrid page-level routing).
     """
     assert os.path.exists(MIXED_BLANK_PDF)
     engine = DummyCustomOCREngine(responses={
@@ -131,12 +131,16 @@ def test_mixed_pdf_routes_full_document_to_ocr():
 
     result = DocumentIngestionRouter.ingest_document(MIXED_BLANK_PDF, ocr_engine=engine)
 
-    assert result.mode == "ocr"
+    assert result.mode == "hybrid"
+    assert result.provider == "pypdf+custom_vendor_engine"
     assert result.fallback_reason == "PDFBlankPageError"
     assert result.page_count == 2
-    assert result.tagged_text.startswith("[PAGE 1]\nTrang 1 hỗn hợp qua OCR")
+    # Trang 1 lấy trực tiếp văn bản kỹ thuật số (không qua OCR engine)
+    assert result.tagged_text.startswith("[PAGE 1]\nCÔNG TY CỔ PHẦN KINH DOANH KHÍ MIỀN NAM")
+    # Trang 2 nhận dạng qua OCR engine
     assert "\n\n[PAGE 2]\nTrang 2 hỗn hợp qua OCR" in result.tagged_text
-    assert engine.call_count == 2
+    # Engine CHỈ được gọi đúng 1 lần cho trang 2 (trang 1 hoàn toàn không bị gọi OCR)
+    assert engine.call_count == 1
 
 
 # ==============================================================================

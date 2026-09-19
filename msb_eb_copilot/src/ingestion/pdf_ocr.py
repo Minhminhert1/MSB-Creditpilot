@@ -266,6 +266,81 @@ class PDFOCRIngestor:
             raise OCRRenderError(f"Lỗi tiền kiểm tra tệp PDF: {str(exc)}") from exc
 
     @classmethod
+    def ocr_single_page(
+        cls,
+        pdfium_doc: pdfium.PdfDocument,
+        page_num: int,
+        engine: Optional[BaseOCREngine] = None,
+        dpi: int = DEFAULT_DPI,
+    ) -> OCRPageResult:
+        """Thực hiện rasterize và OCR cho đúng một trang PDF vật lý cụ thể (1-based page_num).
+
+        Args:
+            pdfium_doc: Đối tượng pdfium.PdfDocument đã mở.
+            page_num: Số thứ tự trang vật lý 1-based (dùng cho logging, OCR engine, và telemetry).
+            engine: Engine OCR để nhận dạng. Nếu None, mặc định sử dụng QwenVisionOCREngine().
+            dpi: Độ phân giải rasterize (mặc định 150 DPI).
+
+        Returns:
+            OCRPageResult chứa số trang, văn bản thô chuẩn hóa và metadata.
+
+        Raises:
+            OCRRenderError: Nếu lỗi truy xuất trang hoặc rasterize từ PDFium.
+            OCRNoTextError: Nếu nội dung sau OCR rỗng hoặc không có ký tự chữ/số nào.
+            OCRTimeoutError: Nếu yêu cầu OCR bị quá thời gian chờ.
+            OCRServiceError: Nếu dịch vụ OCR gặp sự cố mạng hoặc lỗi máy chủ.
+        """
+        active_engine = engine or QwenVisionOCREngine()
+        page_idx = page_num - 1
+        scale = dpi / 72.0
+
+        try:
+            page = pdfium_doc[page_idx]
+        except Exception as exc:
+            raise OCRRenderError(f"Lỗi truy xuất trang {page_num} từ PDFium: {str(exc)}") from exc
+
+        # Rasterize trang sang ảnh PIL và đóng handle trang ngay
+        try:
+            try:
+                pil_img = page.render(scale=scale).to_pil()
+            except Exception as exc:
+                raise OCRRenderError(f"Lỗi rasterize trang {page_num} tại {dpi} DPI: {str(exc)}") from exc
+        finally:
+            page.close()  # Giải phóng bitmap C++ của trang ngay lập tức
+
+        # Mã hóa ảnh sang định dạng PNG Base64 trong bộ nhớ
+        try:
+            buf = io.BytesIO()
+            pil_img.save(buf, format="PNG")
+            b64_png = base64.b64encode(buf.getvalue()).decode("utf-8")
+        finally:
+            pil_img.close()
+            del pil_img
+            del buf
+
+        # Gọi OCR Engine cho đúng 1 trang vật lý
+        raw_text = active_engine.ocr_page(b64_png, page_num=page_num)
+
+        # Kiểm định văn bản OCR tất định (Strict validation)
+        if raw_text is None:
+            raise OCRNoTextError(f"Trang {page_num} không nhận được kết quả OCR từ engine.")
+
+        norm_text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip("\n\r\t ")
+
+        if not norm_text:
+            raise OCRNoTextError(f"Trang {page_num} có nội dung OCR hoàn toàn rỗng.")
+
+        if not any(ch.isalnum() for ch in norm_text):
+            raise OCRNoTextError(f"Trang {page_num} không chứa bất kỳ ký tự chữ hoặc số Unicode nào.")
+
+        return OCRPageResult(
+            page_num=page_num,
+            text=norm_text,
+            provider=getattr(active_engine, "provider_name", "qwen_vision"),
+            metadata={"dpi": dpi, "scale": scale}
+        )
+
+    @classmethod
     def extract_document(
         cls,
         pdf_path: str,
@@ -278,9 +353,6 @@ class PDFOCRIngestor:
 
         # 2. Khởi tạo engine mặc định nếu chưa truyền vào
         active_engine = engine or QwenVisionOCREngine()
-
-        # Tính toán tỷ lệ rasterization: scale = dpi / 72 (150 DPI -> scale = 2.0833)
-        scale = dpi / 72.0
 
         # 3. Mở tài liệu bằng pypdfium2 và kiểm tra đối chiếu số trang
         try:
@@ -303,55 +375,13 @@ class PDFOCRIngestor:
             # 4. Vòng lặp tuần tự (Lazy/Sequential processing): chỉ giữ 1 trang trong RAM tại mỗi thời điểm
             for page_idx in range(expected_page_count):
                 page_num = page_idx + 1
-
-                try:
-                    page = pdfium_doc[page_idx]
-                except Exception as exc:
-                    raise OCRRenderError(f"Lỗi truy xuất trang {page_num} từ PDFium: {str(exc)}") from exc
-
-                # Rasterize trang sang ảnh PIL và đóng handle trang ngay
-                try:
-                    try:
-                        pil_img = page.render(scale=scale).to_pil()
-                    except Exception as exc:
-                        raise OCRRenderError(f"Lỗi rasterize trang {page_num} tại {dpi} DPI: {str(exc)}") from exc
-                finally:
-                    page.close()  # Giải phóng bitmap C++ của trang ngay lập tức
-
-                # Mã hóa ảnh sang định dạng PNG Base64 trong bộ nhớ
-                try:
-                    buf = io.BytesIO()
-                    pil_img.save(buf, format="PNG")
-                    b64_png = base64.b64encode(buf.getvalue()).decode("utf-8")
-                finally:
-                    pil_img.close()
-                    del pil_img
-                    del buf
-
-                # 5. Gọi OCR Engine cho đúng 1 trang vật lý
-                raw_text = active_engine.ocr_page(b64_png, page_num=page_num)
-
-                # 6. Kiểm định văn bản OCR tất định (Strict validation)
-                if raw_text is None:
-                    raise OCRNoTextError(f"Trang {page_num} không nhận được kết quả OCR từ engine.")
-
-                # Chuẩn hóa ngắt dòng CRLF/CR -> LF và cắt khoảng trắng đầu/cuối trang
-                norm_text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip("\n\r\t ")
-
-                if not norm_text:
-                    raise OCRNoTextError(f"Trang {page_num} có nội dung OCR hoàn toàn rỗng.")
-
-                if not any(ch.isalnum() for ch in norm_text):
-                    raise OCRNoTextError(f"Trang {page_num} không chứa bất kỳ ký tự chữ hoặc số Unicode nào.")
-
-                page_results.append(
-                    OCRPageResult(
-                        page_num=page_num,
-                        text=norm_text,
-                        provider=getattr(active_engine, "provider_name", "qwen_vision"),
-                        metadata={"dpi": dpi, "scale": scale}
-                    )
+                page_result = cls.ocr_single_page(
+                    pdfium_doc=pdfium_doc,
+                    page_num=page_num,
+                    engine=active_engine,
+                    dpi=dpi
                 )
+                page_results.append(page_result)
 
             # Bắt buộc: Đối chiếu số lượng kết quả trang hoàn thành với số trang dự kiến (Correction 2)
             if len(page_results) != expected_page_count:

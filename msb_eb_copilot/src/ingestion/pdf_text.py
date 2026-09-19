@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 Module: msb_eb_copilot.src.ingestion.pdf_text
 Mô tả: Tầng bóc tách văn bản từ tài liệu PDF kỹ thuật số (Digital/Text-based PDF Ingestion).
@@ -7,7 +7,7 @@ với LegalDocumentExtractor.
 """
 
 import os
-from typing import List
+from typing import List, Optional
 import pypdf
 
 
@@ -57,15 +57,48 @@ class PDFTextIngestor:
     """
 
     @classmethod
+    def extract_page_text(cls, page: pypdf.PageObject, page_num: int = 1, total_pages: int = 1) -> Optional[str]:
+        """Trích xuất văn bản từ một trang pypdf cụ thể theo Preservation Contract.
+
+        Trả về chuỗi văn bản đã chuẩn hóa nếu có ít nhất 1 ký tự chữ hoặc số khả dụng.
+        Trả về None nếu trang rỗng, chỉ chứa khoảng trắng hoặc chỉ có ký tự đặc biệt.
+
+        Args:
+            page: Đối tượng trang pypdf.PageObject.
+            page_num: Số thứ tự trang vật lý 1-based (dùng cho thông báo lỗi).
+            total_pages: Tổng số trang (dùng cho thông báo lỗi).
+
+        Returns:
+            Chuỗi văn bản đã chuẩn hóa (\r\n -> \n, \r -> \n, strip), hoặc None nếu không có text khả dụng.
+
+        Raises:
+            PDFIngestionError: Khi xảy ra lỗi đọc từ page.extract_text().
+        """
+        try:
+            raw_text = page.extract_text()
+        except Exception as e:
+            raise PDFIngestionError(f"Lỗi khi trích xuất văn bản từ trang {page_num}/{total_pages}: {e}") from e
+
+        if raw_text is None:
+            raw_text = ""
+
+        normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        has_usable_character = any(ch.isalnum() for ch in normalized)
+        if not normalized or not has_usable_character:
+            return None
+
+        return normalized
+
+    @classmethod
     def extract_text_with_page_markers(cls, pdf_path: str) -> str:
         """Đọc tệp PDF kỹ thuật số và trả về chuỗi văn bản phân tách trang [PAGE 1], [PAGE 2], ...
-        
+
         Args:
             pdf_path: Đường dẫn tới file PDF.
-            
+
         Returns:
             Chuỗi văn bản bắt đầu trực tiếp bằng [PAGE 1] (zero non-whitespace preamble).
-            
+
         Raises:
             PDFFileNotFoundError: Khi file không tồn tại hoặc không phải là file.
             PDFEncryptedError: Khi file bị mã hóa/cài mật khẩu.
@@ -96,21 +129,8 @@ class PDFTextIngestor:
 
         # 5. Duyệt tuần tự từng trang từ 1 đến N (1-based index)
         for idx, page in enumerate(reader.pages, start=1):
-            try:
-                raw_text = page.extract_text()
-            except Exception as e:
-                raise PDFIngestionError(f"Lỗi khi trích xuất văn bản từ trang {idx}/{total_pages}: {e}") from e
-
-            # Nếu extract_text() trả về None, coi như chuỗi rỗng
-            if raw_text is None:
-                raw_text = ""
-
-            # Chuẩn hóa xuống dòng và cắt khoảng trắng 2 đầu trang
-            normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip()
-
-            # Kiểm tra ký tự khả dụng: bắt buộc có ít nhất một ký tự chữ hoặc số
-            has_usable_character = any(ch.isalnum() for ch in normalized)
-            if not normalized or not has_usable_character:
+            normalized = cls.extract_page_text(page, page_num=idx, total_pages=total_pages)
+            if normalized is None:
                 raise PDFBlankPageError(
                     f"Trang {idx}/{total_pages} của tệp PDF không chứa văn bản kỹ thuật số hợp lệ "
                     f"(trang trắng, trang scan hình ảnh, hoặc chỉ chứa ký tự đặc biệt)."
