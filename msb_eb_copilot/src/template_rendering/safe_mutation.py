@@ -31,6 +31,73 @@ def _is_visual_run(run: Run) -> bool:
     )
 
 
+def _sdt_text_nodes(paragraph_element: Any) -> List[Any]:
+    """Returns <w:t> nodes nested inside any content control (w:sdt) within this paragraph.
+
+    python-docx's Paragraph.runs / Cell.paragraphs only ever see direct <w:r> children of
+    <w:p>. Authoritative MB07 dropdown/placeholder fields (e.g. the "Chọn kết quả" /
+    "Chọn sản phẩm" defaults) live inside <w:sdt><w:sdtContent><w:r><w:t>, which is
+    completely invisible to run-based mutation. Without this check, a mutator that finds
+    "no runs" in such a paragraph will happily append a brand-new sibling run next to the
+    untouched placeholder, producing a silent concatenation defect such as
+    "Chọn kết quảTái cấp và ..." in the rendered document.
+    """
+    return paragraph_element.xpath(".//w:sdt//w:t")
+
+
+def _set_sdt_placeholder_text(
+    t_nodes: List[Any],
+    text: str,
+    bold: Optional[bool] = None,
+    color: Optional[RGBColor] = None,
+    highlight: bool = False,
+    font_name: Optional[str] = None,
+    font_size_pt: Optional[float] = None,
+) -> None:
+    """Replaces a content control's placeholder text in-place (never adds a sibling run).
+
+    Mirrors SectionADocxMutator.set_sdt_dropdown_text: writes the final value into the
+    control's own text node(s) and strips the template's placeholder styling (red color /
+    italics), which is the standard MB07 convention for turning a red instructional
+    placeholder into normal final black content.
+    """
+    if not t_nodes:
+        return
+
+    t_nodes[0].text = text
+    for extra_t in t_nodes[1:]:
+        extra_t.text = ""
+
+    # Apply any requested formatting overrides on the run that owns the surviving text node.
+    owning_run_elem = t_nodes[0].getparent()
+    if owning_run_elem is not None and etree.QName(owning_run_elem).localname == "r":
+        owning_run = Run(owning_run_elem, None)
+        if bold is not None:
+            owning_run.bold = bold
+        if color:
+            owning_run.font.color.rgb = color
+        if highlight:
+            owning_run.font.highlight_color = WD_COLOR_INDEX.YELLOW
+        if font_name:
+            owning_run.font.name = font_name
+        if font_size_pt:
+            owning_run.font.size = Pt(font_size_pt)
+
+    # Strip the template's red/italic placeholder styling within the control's content.
+    sdt_content = t_nodes[0]
+    while sdt_content is not None and etree.QName(sdt_content).localname != "sdtContent":
+        sdt_content = sdt_content.getparent()
+    if sdt_content is not None:
+        for color_elem in sdt_content.findall(".//" + qn("w:color")):
+            parent = color_elem.getparent()
+            if parent is not None:
+                parent.remove(color_elem)
+        for italic_elem in sdt_content.findall(".//" + qn("w:i")):
+            parent = italic_elem.getparent()
+            if parent is not None:
+                parent.remove(italic_elem)
+
+
 class SafeCellMutator:
     """Safe, run-preserving in-place mutation for table cells."""
 
@@ -59,6 +126,26 @@ class SafeCellMutator:
 
         # Handle runs inside the first paragraph
         runs = p.runs
+        text_runs = [r for r in runs if not _is_visual_run(r)]
+        non_blank_text_runs = [r for r in text_runs if (r.text or "").strip()]
+
+        # A template content control (w:sdt) placeholder such as "Chọn kết quả" lives
+        # outside of p.runs entirely. If the only "content" in this paragraph is such a
+        # placeholder (optionally alongside blank/whitespace-only cosmetic runs), the final
+        # value MUST be written into the placeholder itself -- never appended as a new
+        # sibling run, which would silently leave the old placeholder text concatenated in
+        # front of/behind the new value.
+        sdt_t_nodes = _sdt_text_nodes(p._p)
+        if sdt_t_nodes and not non_blank_text_runs:
+            _set_sdt_placeholder_text(
+                sdt_t_nodes, text_str,
+                bold=bold, color=color, highlight=highlight,
+                font_name=font_name, font_size_pt=font_size_pt,
+            )
+            for blank_run in text_runs:
+                blank_run.text = ""
+            return
+
         if not runs:
             # Create a run and apply standard MB07 font defaults if needed
             r = p.add_run(text_str)
@@ -72,7 +159,6 @@ class SafeCellMutator:
                 r.font.highlight_color = WD_COLOR_INDEX.YELLOW
             return
 
-        text_runs = [r for r in runs if not _is_visual_run(r)]
         if not text_runs:
             donor_run = p.add_run(text_str)
             donor_run.font.name = font_name or "Times New Roman"
@@ -180,6 +266,22 @@ class SafeParagraphMutator:
             paragraph.alignment = align
 
         runs = paragraph.runs
+        text_runs = [r for r in runs if not _is_visual_run(r)]
+        non_blank_text_runs = [r for r in text_runs if (r.text or "").strip()]
+
+        # Same content-control placeholder guard as SafeCellMutator.set_cell_text (see there
+        # for full rationale): never append a sibling run next to an untouched w:sdt
+        # placeholder such as "Chọn kết quả".
+        sdt_t_nodes = _sdt_text_nodes(paragraph._p)
+        if sdt_t_nodes and not non_blank_text_runs:
+            _set_sdt_placeholder_text(
+                sdt_t_nodes, text_str,
+                bold=bold, color=color, highlight=highlight,
+            )
+            for blank_run in text_runs:
+                blank_run.text = ""
+            return
+
         if not runs:
             r = paragraph.add_run(text_str)
             r.font.name = "Times New Roman"
@@ -192,7 +294,6 @@ class SafeParagraphMutator:
                 r.font.highlight_color = WD_COLOR_INDEX.YELLOW
             return
 
-        text_runs = [r for r in runs if not _is_visual_run(r)]
         if not text_runs:
             donor_run = paragraph.add_run(text_str)
             donor_run.font.name = "Times New Roman"

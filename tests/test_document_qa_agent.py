@@ -18,6 +18,7 @@ vision agent.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -27,6 +28,7 @@ import zipfile
 from unittest.mock import MagicMock, patch
 
 import docx
+import openai
 from docx.shared import Pt
 
 from msb_eb_copilot.src.document_qa_agent import (
@@ -35,6 +37,7 @@ from msb_eb_copilot.src.document_qa_agent import (
     DocxPageRenderer,
     GreenNodeVisionQAError,
     GreenNodeVisualQAAgent,
+    MAX_VISUAL_QA_ATTEMPTS,
     STATUS_FAIL,
     STATUS_PASS,
     STATUS_VISUAL_QA_UNAVAILABLE,
@@ -356,6 +359,332 @@ class TestGreenNodeVisualQAAgentUnit(unittest.TestCase):
         self.assertIn("authoritative", system_prompt.lower())
         self.assertIn("strict json", system_prompt.lower())
         self.assertIn("do not", system_prompt.lower())
+
+
+def _build_single_finding_page_json(fail_category: str, description: str) -> str:
+    """Builds a raw GreenNode-style JSON response where exactly one category is claimed
+    FAIL, backed by exactly one finding attached to that category."""
+    payload = {
+        "logo": "PASS",
+        "header_footer": "PASS",
+        "font_consistency": "PASS",
+        "table_layout": "PASS",
+        "spacing_alignment": "PASS",
+    }
+    payload[fail_category] = "FAIL"
+    payload["overall_visual_fidelity"] = "FAIL"
+    payload["findings"] = [{"category": fail_category, "description": description}]
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _compare_with_mocked_content(raw_content: str) -> dict:
+    with patch("openai.resources.chat.completions.Completions.create") as mock_create:
+        mock_resp = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = raw_content
+        mock_resp.choices = [mock_choice]
+        mock_create.return_value = mock_resp
+
+        agent = GreenNodeVisualQAAgent(api_key="mock_key")
+        return agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=1)
+
+
+class TestVisualQAFalsePositiveFilter(unittest.TestCase):
+    """Regression tests for the observed false-positive bug: the GreenNode vision reviewer
+    was treating CONTENT and PAGINATION differences as formatting defects. These tests lock
+    in that such findings are ignored (never cause FAIL), while genuine visual defects still
+    correctly FAIL. No real network/API calls are made — the OpenAI client is mocked."""
+
+    IGNORED_CASES = [
+        ("missing_rows", "table_layout",
+         "Table 15 in the generated document is missing 2 rows that are present in the template."),
+        ("missing_template_guidance", "spacing_alignment",
+         "The template's guidance text explaining how to fill this field is missing here."),
+        ("missing_dotted_placeholder", "spacing_alignment",
+         "The dotted placeholder lines from the template have disappeared in this field."),
+        ("footnote_number_difference", "header_footer",
+         "The footnote number differs from the template (footnote 3 here vs footnote 2 in the template)."),
+        ("section_moved_to_another_page", "header_footer",
+         "Section C now appears on a different page than in the template."),
+        ("red_instructional_text_now_black", "font_consistency",
+         "The template's red instructional text has become normal black content here."),
+    ]
+
+    STILL_FAILING_CASES = [
+        ("sans_serif_block_in_times_new_roman_doc", "font_consistency",
+         "A block of text renders in a sans-serif font while the rest of the document uses Times New Roman."),
+        ("text_concatenation_tai_cap", "spacing_alignment",
+         "Two labels run together with no separating space: \"Chọn kết quảTái cấp và\"."),
+        ("text_concatenation_toi_da", "spacing_alignment",
+         "Two labels run together with no separating space: \"Chọn kết quảTối đa 700 tỷ đồng\"."),
+        ("broken_table_geometry", "table_layout",
+         "Table borders are broken and cell geometry is malformed and collapsed."),
+        ("missing_visible_logo", "logo",
+         "The MSB logo is completely missing from the header area where it should render."),
+        ("overlapping_clipped_text", "spacing_alignment",
+         "Text is visibly clipped and overlapping at the bottom of the page."),
+    ]
+
+    def test_ignored_content_and_pagination_findings_do_not_fail(self):
+        for name, category, description in self.IGNORED_CASES:
+            with self.subTest(case=name):
+                raw = _build_single_finding_page_json(category, description)
+                result = _compare_with_mocked_content(raw)
+
+                self.assertEqual(
+                    result[category], STATUS_PASS,
+                    msg=f"'{name}' should be downgraded to PASS (content/pagination-only finding), got {result}",
+                )
+                self.assertEqual(result["overall_visual_fidelity"], STATUS_PASS, msg=f"'{name}': {result}")
+                self.assertEqual(result["issues"], [], msg=f"'{name}' should leave no surfaced issue: {result}")
+
+    def test_genuine_visual_defects_still_fail(self):
+        for name, category, description in self.STILL_FAILING_CASES:
+            with self.subTest(case=name):
+                raw = _build_single_finding_page_json(category, description)
+                result = _compare_with_mocked_content(raw)
+
+                self.assertEqual(
+                    result[category], STATUS_FAIL,
+                    msg=f"'{name}' is a genuine visual defect and must still FAIL, got {result}",
+                )
+                self.assertEqual(result["overall_visual_fidelity"], STATUS_FAIL, msg=f"'{name}': {result}")
+                self.assertIn(description, result["issues"], msg=f"'{name}': {result}")
+
+    def test_fail_with_no_backing_finding_is_downgraded(self):
+        """A category claimed FAIL with an empty findings list has no evidence at all and
+        must be downgraded, closing the loophole where a model fails a category without
+        attaching any finding to justify it."""
+        payload = {
+            "logo": "PASS", "header_footer": "PASS", "font_consistency": "PASS",
+            "table_layout": "FAIL", "spacing_alignment": "PASS",
+            "overall_visual_fidelity": "FAIL", "findings": [],
+        }
+        result = _compare_with_mocked_content(json.dumps(payload))
+
+        self.assertEqual(result["table_layout"], STATUS_PASS)
+        self.assertEqual(result["overall_visual_fidelity"], STATUS_PASS)
+        self.assertEqual(result["issues"], [])
+
+    def test_mixed_page_only_genuine_defect_survives(self):
+        """A page with both a content-completeness finding AND a genuine defect on two
+        different categories must fail only for the genuine one."""
+        payload = {
+            "logo": "FAIL", "header_footer": "PASS", "font_consistency": "PASS",
+            "table_layout": "FAIL", "spacing_alignment": "PASS",
+            "overall_visual_fidelity": "FAIL",
+            "findings": [
+                {"category": "logo", "description": "The MSB logo is completely missing from the header."},
+                {"category": "table_layout", "description": "Table 15 is missing 2 rows versus the template."},
+            ],
+        }
+        result = _compare_with_mocked_content(json.dumps(payload))
+
+        self.assertEqual(result["logo"], STATUS_FAIL)
+        self.assertEqual(result["table_layout"], STATUS_PASS)
+        self.assertEqual(result["overall_visual_fidelity"], STATUS_FAIL)
+        self.assertEqual(result["issues"], ["The MSB logo is completely missing from the header."])
+
+
+_VALID_PASS_JSON = (
+    '{"logo": "PASS", "header_footer": "PASS", "font_consistency": "PASS", '
+    '"table_layout": "PASS", "spacing_alignment": "PASS", '
+    '"overall_visual_fidelity": "PASS", "findings": []}'
+)
+
+
+def _mock_success_response(content: str = _VALID_PASS_JSON):
+    resp = MagicMock()
+    choice = MagicMock()
+    choice.message.content = content
+    resp.choices = [choice]
+    return resp
+
+
+def _mock_status_error(exc_cls, status_code: int, retry_after=None):
+    headers = {"Retry-After": str(retry_after)} if retry_after is not None else {}
+    response = MagicMock(status_code=status_code, headers=headers)
+    return exc_cls(f"simulated error {status_code}", response=response, body=None)
+
+
+class TestGreenNodeRetryPolicy(unittest.TestCase):
+    """Regression tests for bounded retry on retryable GreenNode API errors (HTTP 429, 500,
+    502, 503, 504). time.sleep is mocked so these tests run instantly and make no real
+    network/API calls."""
+
+    def setUp(self):
+        self._sleep_patcher = patch("msb_eb_copilot.src.document_qa_agent.time.sleep")
+        self.mock_sleep = self._sleep_patcher.start()
+        self.addCleanup(self._sleep_patcher.stop)
+
+    @patch("openai.resources.chat.completions.Completions.create")
+    def test_429_then_success_yields_pass(self, mock_create):
+        err_429 = _mock_status_error(openai.RateLimitError, 429)
+        mock_create.side_effect = [err_429, _mock_success_response()]
+
+        agent = GreenNodeVisualQAAgent(api_key="mock_key")
+        result = agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=1)
+
+        self.assertEqual(result["overall_visual_fidelity"], STATUS_PASS)
+        self.assertEqual(mock_create.call_count, 2)
+        self.assertEqual(self.mock_sleep.call_count, 1)
+
+    @patch("openai.resources.chat.completions.Completions.create")
+    def test_multiple_429_then_success_yields_pass(self, mock_create):
+        err_429 = _mock_status_error(openai.RateLimitError, 429)
+        mock_create.side_effect = [err_429, err_429, _mock_success_response()]
+
+        agent = GreenNodeVisualQAAgent(api_key="mock_key")
+        result = agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=1)
+
+        self.assertEqual(result["overall_visual_fidelity"], STATUS_PASS)
+        self.assertEqual(mock_create.call_count, 3)
+        self.assertEqual(self.mock_sleep.call_count, 2)
+
+    @patch("openai.resources.chat.completions.Completions.create")
+    def test_429_exhausted_fails_closed_with_explicit_message(self, mock_create):
+        err_429 = _mock_status_error(openai.RateLimitError, 429)
+        mock_create.side_effect = [err_429, err_429, err_429, err_429, err_429]
+
+        agent = GreenNodeVisualQAAgent(api_key="mock_key")
+        with self.assertRaises(GreenNodeVisionQAError) as ctx:
+            agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=3)
+
+        self.assertIn("GreenNode visual QA rate limit/retry exhausted", str(ctx.exception))
+        self.assertEqual(mock_create.call_count, MAX_VISUAL_QA_ATTEMPTS)
+        self.assertEqual(self.mock_sleep.call_count, MAX_VISUAL_QA_ATTEMPTS - 1)
+
+    @patch("openai.resources.chat.completions.Completions.create")
+    def test_500_retry_then_success_yields_pass(self, mock_create):
+        err_500 = _mock_status_error(openai.InternalServerError, 500)
+        mock_create.side_effect = [err_500, _mock_success_response()]
+
+        agent = GreenNodeVisualQAAgent(api_key="mock_key")
+        result = agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=1)
+
+        self.assertEqual(result["overall_visual_fidelity"], STATUS_PASS)
+        self.assertEqual(mock_create.call_count, 2)
+        self.assertEqual(self.mock_sleep.call_count, 1)
+
+    @patch("openai.resources.chat.completions.Completions.create")
+    def test_502_503_504_are_also_retried(self, mock_create):
+        for status_code in (502, 503, 504):
+            with self.subTest(status_code=status_code):
+                mock_create.reset_mock()
+                self.mock_sleep.reset_mock()
+                err = _mock_status_error(openai.InternalServerError, status_code)
+                mock_create.side_effect = [err, _mock_success_response()]
+
+                agent = GreenNodeVisualQAAgent(api_key="mock_key")
+                result = agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=1)
+
+                self.assertEqual(result["overall_visual_fidelity"], STATUS_PASS)
+                self.assertEqual(mock_create.call_count, 2)
+
+    @patch("openai.resources.chat.completions.Completions.create")
+    def test_retry_after_header_is_respected(self, mock_create):
+        err_429 = _mock_status_error(openai.RateLimitError, 429, retry_after=7)
+        mock_create.side_effect = [err_429, _mock_success_response()]
+
+        agent = GreenNodeVisualQAAgent(api_key="mock_key")
+        agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=1)
+
+        self.mock_sleep.assert_called_once_with(7.0)
+
+    @patch("openai.resources.chat.completions.Completions.create")
+    def test_malformed_json_is_not_retried(self, mock_create):
+        mock_create.return_value = _mock_success_response("this is not JSON at all")
+
+        agent = GreenNodeVisualQAAgent(api_key="mock_key")
+        with self.assertRaises(GreenNodeVisionQAError):
+            agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=1)
+
+        self.assertEqual(mock_create.call_count, 1)
+        self.mock_sleep.assert_not_called()
+
+    @patch("openai.resources.chat.completions.Completions.create")
+    def test_non_retryable_400_is_not_retried(self, mock_create):
+        err_400 = _mock_status_error(openai.BadRequestError, 400)
+        mock_create.side_effect = [err_400, _mock_success_response()]
+
+        agent = GreenNodeVisualQAAgent(api_key="mock_key")
+        with self.assertRaises(GreenNodeVisionQAError) as ctx:
+            agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=1)
+
+        self.assertNotIn("retry exhausted", str(ctx.exception).lower())
+        self.assertEqual(mock_create.call_count, 1)
+        self.mock_sleep.assert_not_called()
+
+
+class _TwoPageFakeRenderer(DocxPageRenderer):
+    """Test double producing 2 pages, used to verify the inter-page pacing delay."""
+
+    @classmethod
+    def is_available(cls) -> bool:
+        return True
+
+    @classmethod
+    def render_to_page_images(cls, docx_path, out_dir, dpi=150, max_pages=None, timeout=120.0):
+        os.makedirs(out_dir, exist_ok=True)
+        paths = []
+        for i in (1, 2):
+            img_path = os.path.join(out_dir, f"page_{i}.png")
+            with open(img_path, "wb") as f:
+                f.write(b"\x89PNG\r\n\x1a\n\x00\x00\x00\x00")
+            paths.append(img_path)
+        return paths
+
+
+class _FakeVisionAgentAlwaysPass:
+    model = "fake/qwen3.6-flash-stub"
+
+    def compare_page(self, template_b64_png, generated_b64_png, page_num):
+        return {
+            "logo": "PASS", "header_footer": "PASS", "font_consistency": "PASS",
+            "table_layout": "PASS", "spacing_alignment": "PASS",
+            "overall_visual_fidelity": "PASS", "issues": [],
+        }
+
+
+class TestPageDelayPacing(unittest.TestCase):
+    """Verifies the configurable inter-page delay (DOCUMENT_QA_PAGE_DELAY_SECONDS) is applied
+    between successful page calls, independent of retry backoff."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.template_path = _authoritative_template_path()
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.compatible_docx = os.path.join(self.temp_dir, "compatible.docx")
+        shutil.copyfile(self.template_path, self.compatible_docx)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_delay_applied_between_pages_but_not_after_last_page(self):
+        with patch("msb_eb_copilot.src.document_qa_agent.time.sleep") as mock_sleep:
+            agent = DocumentQAAgent(
+                template_path=self.template_path,
+                renderer=_TwoPageFakeRenderer,
+                vision_agent_factory=_FakeVisionAgentAlwaysPass,
+                page_delay_seconds=3.5,
+            )
+            result = agent.run_qa(self.compatible_docx)
+
+            self.assertEqual(result["status"], STATUS_PASS)
+            mock_sleep.assert_called_once_with(3.5)
+
+    def test_zero_delay_skips_sleep(self):
+        with patch("msb_eb_copilot.src.document_qa_agent.time.sleep") as mock_sleep:
+            agent = DocumentQAAgent(
+                template_path=self.template_path,
+                renderer=_TwoPageFakeRenderer,
+                vision_agent_factory=_FakeVisionAgentAlwaysPass,
+                page_delay_seconds=0,
+            )
+            agent.run_qa(self.compatible_docx)
+            mock_sleep.assert_not_called()
 
 
 if __name__ == "__main__":

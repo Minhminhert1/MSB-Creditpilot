@@ -5,6 +5,8 @@ Description: Unit and integration tests for MB07 AnchorResolver and Safe Mutatio
 import os
 import unittest
 import docx
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls, qn
 from docx.shared import Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 
@@ -25,6 +27,38 @@ from msb_eb_copilot.src.template_rendering.safe_mutation import (
     SafeParagraphMutator,
     DynamicRowCloner,
 )
+
+
+# Mirrors the real MB07 template's dropdown placeholder pattern: a content control
+# (w:sdt) whose display run carries the red/italic "Chọn kết quả" default, living
+# entirely inside w:sdtContent -- invisible to python-docx's Paragraph.runs.
+SDT_PLACEHOLDER_XML = (
+    f"<w:sdt {nsdecls('w')}>"
+    "<w:sdtPr><w:alias w:val=\"Chọn kết quả\"/></w:sdtPr>"
+    "<w:sdtContent>"
+    "<w:r><w:rPr><w:color w:val=\"FF0000\"/><w:i/></w:rPr><w:t>Chọn kết quả</w:t></w:r>"
+    "</w:sdtContent>"
+    "</w:sdt>"
+)
+
+
+def _clear_direct_runs(paragraph) -> None:
+    for r in list(paragraph._p.findall(qn("w:r"))):
+        paragraph._p.remove(r)
+
+
+def _inject_sdt_placeholder(paragraph) -> None:
+    """Replaces a paragraph's direct runs with a synthetic 'Chọn kết quả' content control,
+    reproducing the exact structural shape found in the authoritative MB07 template."""
+    _clear_direct_runs(paragraph)
+    paragraph._p.append(parse_xml(SDT_PLACEHOLDER_XML))
+
+
+def _full_text(oxml_element) -> str:
+    """Reconstructs the visually-rendered text of an element in document order, including
+    text nested inside content controls (w:sdt) -- i.e. what Word/LibreOffice would render,
+    as opposed to python-docx's run-only Paragraph.text / Cell.text."""
+    return "".join(t.text or "" for t in oxml_element.xpath(".//w:t"))
 
 
 class TestAnchorAndSafeMutation(unittest.TestCase):
@@ -120,6 +154,65 @@ class TestAnchorAndSafeMutation(unittest.TestCase):
         SafeCellMutator.set_cell_text(new_row.cells[2], "500.000")
 
         self.assertEqual(new_row.cells[1].text, "Vay hạn mức")
+
+    # ------------------------------------------------------------------
+    # Regression: content-control (w:sdt) placeholder must never survive
+    # concatenated with the final value (e.g. "Chọn kết quảTái cấp và ...").
+    # ------------------------------------------------------------------
+
+    def test_set_cell_text_replaces_sdt_placeholder_without_concatenation(self):
+        cell = self.doc.add_table(rows=1, cols=1).rows[0].cells[0]
+        _inject_sdt_placeholder(cell.paragraphs[0])
+
+        SafeCellMutator.set_cell_text(cell, "Tái cấp và nâng HMTD từ 500 tỷ lên 700 tỷ đồng")
+
+        full_text = _full_text(cell._tc)
+        self.assertEqual(full_text, "Tái cấp và nâng HMTD từ 500 tỷ lên 700 tỷ đồng")
+        self.assertNotIn("Chọn kết quả", full_text)
+        # The content control wrapper itself is preserved (not destructively rebuilt),
+        # and no duplicate sibling run was appended.
+        self.assertEqual(len(cell._tc.xpath(".//w:sdt")), 1)
+        self.assertEqual(len(cell.paragraphs[0].runs), 0)
+        # Placeholder red/italic styling is stripped now that real content is final.
+        self.assertEqual(len(cell._tc.xpath(".//w:color")), 0)
+        self.assertEqual(len(cell._tc.xpath(".//w:i")), 0)
+
+    def test_set_cell_text_replaces_sdt_placeholder_with_whitespace_sibling_run(self):
+        """Some template cells pair the sdt with a purely cosmetic whitespace run; that
+        run must not become a decoy donor run that leaves the placeholder untouched."""
+        cell = self.doc.add_table(rows=1, cols=1).rows[0].cells[0]
+        p = cell.paragraphs[0]
+        _inject_sdt_placeholder(p)
+        p.add_run("  ")
+
+        SafeCellMutator.set_cell_text(cell, "Tối đa 700 tỷ đồng")
+
+        full_text = _full_text(cell._tc)
+        self.assertEqual(full_text, "Tối đa 700 tỷ đồng")
+        self.assertNotIn("Chọn kết quả", full_text)
+
+    def test_set_cell_text_with_real_sibling_content_leaves_sdt_untouched(self):
+        """If a paragraph already has genuine (non-blank) text alongside an sdt, the
+        existing donor-run behavior is preserved and the sdt is left alone."""
+        cell = self.doc.add_table(rows=1, cols=1).rows[0].cells[0]
+        p = cell.paragraphs[0]
+        _inject_sdt_placeholder(p)
+        real_run = p.add_run("EXISTING_REAL_CONTENT")
+
+        SafeCellMutator.set_cell_text(cell, "NEW_VALUE")
+
+        self.assertEqual(real_run.text, "NEW_VALUE")
+
+    def test_set_paragraph_text_replaces_sdt_placeholder_without_concatenation(self):
+        p = self.doc.add_paragraph()
+        _inject_sdt_placeholder(p)
+
+        SafeParagraphMutator.set_paragraph_text(p, "Tối đa 700 tỷ đồng")
+
+        full_text = _full_text(p._p)
+        self.assertEqual(full_text, "Tối đa 700 tỷ đồng")
+        self.assertNotIn("Chọn kết quả", full_text)
+        self.assertEqual(len(p._p.xpath(".//w:sdt")), 1)
 
 
 if __name__ == "__main__":

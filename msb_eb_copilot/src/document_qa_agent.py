@@ -29,7 +29,10 @@ Absolute rules:
 from __future__ import annotations
 
 import base64
+import logging
 import os
+import random
+import re
 import shutil
 import subprocess
 import tempfile
@@ -59,6 +62,8 @@ try:
 except ImportError:  # pragma: no cover
     _json = None
 
+logger = logging.getLogger(__name__)
+
 
 # ==============================================================================
 # 0. CONSTANTS & DEFAULTS
@@ -80,6 +85,19 @@ REQUIRED_ZIP_ENTRIES = ("[Content_Types].xml", "_rels/.rels", "word/document.xml
 
 DEFAULT_VISUAL_QA_MAX_PAGES = int(os.getenv("DOCUMENT_QA_MAX_PAGES", "6") or "6")
 DEFAULT_RENDER_DPI = int(os.getenv("DOCUMENT_QA_RENDER_DPI", "150") or "150")
+
+# Small, configurable pacing delay between successful GreenNode page calls (independent of
+# retry backoff), to stay comfortably under rate limits on multi-page documents.
+DEFAULT_PAGE_DELAY_SECONDS = float(os.getenv("DOCUMENT_QA_PAGE_DELAY_SECONDS", "2.0") or "2.0")
+
+# Retry policy for retryable GreenNode API errors (HTTP 429/500/502/503/504) ONLY.
+# Non-retryable errors (4xx other than 429) and malformed JSON responses are never retried
+# and fail closed immediately.
+MAX_VISUAL_QA_ATTEMPTS = 4
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+# Approximate exponential backoff between attempts 1->2, 2->3, 3->4.
+_RETRY_BACKOFF_SCHEDULE_SECONDS: Tuple[float, ...] = (2.0, 5.0, 10.0)
+_RETRY_JITTER_MAX_SECONDS = 1.0
 
 STATUS_PASS = "PASS"
 STATUS_FAIL = "FAIL"
@@ -470,41 +488,123 @@ VISION_QA_SYSTEM_PROMPT = (
     "You are a strict, READ-ONLY Visual Formatting QA reviewer for MSB bank credit-proposal "
     "documents (MB07 template).\n"
     "You are a REVIEWER ONLY. You never edit, repair, rewrite, or suggest direct modification of "
-    "the DOCX file. You only report PASS/FAIL/UNKNOWN judgments and issues.\n\n"
+    "the DOCX file. You only report PASS/FAIL/UNKNOWN judgments and structured findings.\n\n"
     "You will be shown exactly two page images in this order:\n"
-    "1. The AUTHORITATIVE MB07 TEMPLATE page — this is the formatting REFERENCE.\n"
+    "1. The AUTHORITATIVE MB07 TEMPLATE page — a STYLE/LAYOUT REFERENCE ONLY. It is NOT an "
+    "exact content replica or a page-by-page match of the final document.\n"
     "2. The GENERATED PROPOSAL page — rendered from the same MB07 template, populated with a "
     "specific customer's data.\n\n"
-    "CRITICAL RULES:\n"
-    "- Business/customer content (customer names, numbers, narrative wording, dates, amounts) is "
-    "EXPECTED to differ between the two images. This is NORMAL. NEVER flag a content difference as "
-    "an issue.\n"
-    "- Do NOT assess, comment on, or judge credit content, business meaning, financial figures, "
-    "risk, or approve/reject any credit proposal. You are not a credit reviewer.\n"
-    "- ONLY inspect visual layout and formatting fidelity of the SECOND image relative to the "
-    "FIRST image's formatting style:\n"
-    "  * MSB logo presence and placement\n"
-    "  * header/footer presence and layout\n"
-    "  * font size consistency\n"
-    "  * obvious font-family inconsistency\n"
-    "  * paragraph spacing/alignment\n"
-    "  * broken tables (misaligned columns, collapsed cells, missing borders)\n"
-    "  * overflowing or clipped text\n"
-    "  * unexpected blank areas\n"
-    "  * page orientation/layout\n"
-    "  * visually corrupted sections (garbled rendering, overlapping elements)\n\n"
+    "ABSOLUTE GROUND RULES — every one of the following is NORMAL and EXPECTED, and must NEVER "
+    "be reported as a defect or cause a FAIL:\n"
+    "- Generated content (customer names, numbers, narrative wording, dates, amounts) differs "
+    "from the template's placeholder/example content.\n"
+    "- Pagination differs: the generated document may have more or fewer pages than the "
+    "template because customer data and narrative text have different lengths.\n"
+    "- A section, table, or paragraph appears on a different page than in the template, or "
+    "content flows onto the next/previous page.\n"
+    "- Template guidance text, instructions, or placeholder wording intentionally disappears in "
+    "the final generated document.\n"
+    "- Template RED instructional text intentionally becomes normal BLACK final content — this "
+    "is the intended final state, not a color/font defect.\n"
+    "- Placeholder dots, ellipses, or dotted lines intentionally disappear once real data fills "
+    "the field.\n"
+    "- A table has fewer or more populated ROWS than the template. Row-count differences are "
+    "owned entirely by deterministic structural QA, never by you.\n"
+    "- Footnote numbering or footnote text presence/content differs from the template. "
+    "Footnotes are NOT a visual-fidelity criterion.\n"
+    "- Any missing or extra business content, rows, sections, footnotes, labels, or "
+    "placeholders.\n\n"
+    "DO NOT assess or comment on: document/content completeness, whether all expected content "
+    "is present, business or credit meaning, financial figures, or approve/reject any credit "
+    "proposal — you are not a credit reviewer. Deterministic Python QA already owns document "
+    "structure (section count, table count, headers/footers existing, margins). You own ONLY "
+    "visible formatting/RENDERING quality — how the things that ARE on the page actually look, "
+    "never whether the right things are present.\n\n"
+    "You may ONLY fail one of these 5 categories, and ONLY for a genuine VISUAL rendering/"
+    "formatting defect that is completely independent of any business-content or pagination "
+    "difference:\n"
+    "  * logo — the MSB logo is visibly missing, broken, or corrupted where it should render.\n"
+    "  * header_footer — header/footer is visibly corrupted, garbled, or overlapping other "
+    "content (NOT merely a different page number or different footnote content).\n"
+    "  * font_consistency — an obvious font-family or font-size inconsistency within the "
+    "document's own style (e.g. a sans-serif block inside an otherwise Times New Roman "
+    "document), independent of what the text actually says.\n"
+    "  * table_layout — a table is structurally broken on the page: malformed or missing "
+    "borders, misaligned or collapsed cell geometry, visibly wrong column widths. NOT simply a "
+    "different number of populated rows.\n"
+    "  * spacing_alignment — abnormal paragraph spacing/alignment, text that is visibly "
+    "clipped, overflowing, or run together with no separating space (e.g. \"Chọn kết quảTái "
+    "cấp và\" or \"Chọn kết quảTối đa 700 tỷ đồng\"), or a large unexplained blank area caused "
+    "by a rendering/layout error (NOT merely content ending early on a page).\n\n"
     "Return STRICT JSON ONLY. No markdown code fences. No commentary before or after the JSON. "
     "The JSON object MUST match exactly this schema:\n"
     '{"logo": "PASS|FAIL|UNKNOWN", "header_footer": "PASS|FAIL|UNKNOWN", '
     '"font_consistency": "PASS|FAIL|UNKNOWN", "table_layout": "PASS|FAIL|UNKNOWN", '
     '"spacing_alignment": "PASS|FAIL|UNKNOWN", "overall_visual_fidelity": "PASS|FAIL", '
-    '"issues": ["short strings describing only genuine formatting/layout defects"]}\n'
-    "If you cannot determine a category from the image, use \"UNKNOWN\" for that category only. "
-    "\"overall_visual_fidelity\" must be \"FAIL\" if any category is FAIL, otherwise \"PASS\"."
+    '"findings": [{"category": '
+    '"logo|header_footer|font_consistency|table_layout|spacing_alignment", '
+    '"description": "short factual description of ONE genuine visual defect only"}]}\n'
+    "If a category cannot be determined from this page (e.g. no table on this page), use "
+    "\"UNKNOWN\" for that category only. Every category you mark FAIL MUST have at least one "
+    "matching entry in \"findings\" with that exact category, describing the genuine visual "
+    "defect only — NEVER a content, pagination, footnote, placeholder, or completeness "
+    "observation. If you have no genuine visual defect to report, \"findings\" must be an empty "
+    "list and every category must be PASS or UNKNOWN."
 )
 
 _ALLOWED_CATEGORY_VALUES = {STATUS_PASS, STATUS_FAIL, STATUS_UNKNOWN}
 _ALLOWED_OVERALL_VALUES = {STATUS_PASS, STATUS_FAIL}
+_ALLOWED_FINDING_CATEGORIES = set(_VISUAL_CHECK_KEYS)
+
+# Defensive backstop (schema/prompt validation is the primary defense above): even a
+# well-behaved model can still attach a content/pagination-only observation as "evidence"
+# for a FAIL. A finding matching one of these keyword groups can NEVER, on its own,
+# substantiate a FAIL for the category it's attached to (see _validate_visual_schema).
+# Each group is a tuple of keyword stems that must ALL appear somewhere in the finding text
+# (in any order/distance) for it to count as a content/pagination-only observation — this is
+# deliberately looser than fixed-phrase matching, since real model wording varies
+# ("missing 2 rows", "2 rows are missing", "row count differs", ...).
+_CONTENT_COMPLETENESS_KEYWORD_GROUPS: Tuple[Tuple[str, ...], ...] = (
+    ("missing", "row"), ("extra", "row"), ("unexpected", "row"), ("fewer", "row"), ("more", "row"),
+    ("row", "count"),
+    ("missing", "section"), ("extra", "section"), ("different", "section"),
+    ("missing", "footnote"), ("different", "footnote"), ("footnote", "number"), ("footnote", "content"),
+    ("missing", "text"), ("missing", "label"), ("missing", "wording"),
+    ("placeholder",),
+    ("dotted",),
+    ("ellipsis",),
+    ("guidance", "text"),
+    ("instructional", "text"),
+    ("instruction", "text"),
+    ("red", "text"),
+    ("becom", "black"),
+    ("pagination",),
+    ("page", "shift"),
+    ("different", "page"),
+    ("another", "page"),
+    ("next", "page"),
+    ("previous", "page"),
+    ("flow", "page"),
+    ("different", "customer"),
+    ("different", "business"),
+    ("content", "difference"),
+    ("business", "content"),
+    ("customer", "data"),
+)
+
+_COMPILED_CONTENT_COMPLETENESS_GROUPS: Tuple[Tuple["re.Pattern", ...], ...] = tuple(
+    tuple(re.compile(rf"\b{re.escape(term)}", re.IGNORECASE) for term in group)
+    for group in _CONTENT_COMPLETENESS_KEYWORD_GROUPS
+)
+
+
+def _is_content_completeness_finding(description: str) -> bool:
+    """True if the finding text only describes a content/pagination difference — the kind
+    of thing the vision reviewer is explicitly told is normal and must never cause a FAIL."""
+    return any(
+        all(pattern.search(description) for pattern in group)
+        for group in _COMPILED_CONTENT_COMPLETENESS_GROUPS
+    )
 
 
 def _strip_markdown_fence(text: str) -> str:
@@ -540,6 +640,17 @@ def _parse_strict_json(raw_content: str, page_num: int) -> Dict[str, Any]:
 
 
 def _validate_visual_schema(parsed: Any, page_num: int) -> Dict[str, Any]:
+    """Validates the raw GreenNode response, then applies the content/pagination finding
+    filter and re-derives each category (and overall_visual_fidelity) from surviving,
+    genuinely-visual, category-scoped findings only.
+
+    A category the model marked FAIL is downgraded to PASS if none of its attached findings
+    survive the content-completeness filter (i.e. the only "evidence" for that FAIL was a
+    content, pagination, footnote, placeholder, or completeness observation — which this
+    reviewer is never allowed to use as grounds for FAIL). overall_visual_fidelity is always
+    recomputed in Python from the (possibly downgraded) categories, never trusted verbatim
+    from the model.
+    """
     if not isinstance(parsed, dict):
         raise GreenNodeVisionQAError(f"GreenNode visual QA response for page {page_num} is not a JSON object.")
 
@@ -556,22 +667,59 @@ def _validate_visual_schema(parsed: Any, page_num: int) -> Dict[str, Any]:
                 f"GreenNode visual QA response for page {page_num} has invalid value for '{key}': {value!r}."
             )
 
-    overall = parsed.get("overall_visual_fidelity")
-    if overall not in _ALLOWED_OVERALL_VALUES:
+    overall_raw = parsed.get("overall_visual_fidelity")
+    if overall_raw not in _ALLOWED_OVERALL_VALUES:
         raise GreenNodeVisionQAError(
-            f"GreenNode visual QA response for page {page_num} has invalid 'overall_visual_fidelity': {overall!r}."
+            f"GreenNode visual QA response for page {page_num} has invalid 'overall_visual_fidelity': {overall_raw!r}."
         )
 
-    issues = parsed.get("issues", [])
-    if issues is None:
-        issues = []
-    if not isinstance(issues, list):
+    raw_findings = parsed.get("findings")
+    if raw_findings is None:
+        raw_findings = []
+    if not isinstance(raw_findings, list):
         raise GreenNodeVisionQAError(
-            f"GreenNode visual QA response for page {page_num} has non-list 'issues' field."
+            f"GreenNode visual QA response for page {page_num} has non-list 'findings' field."
         )
 
-    parsed["issues"] = [str(i) for i in issues]
-    return parsed
+    genuine_findings: List[Tuple[str, str]] = []  # (category, description)
+    categories_with_genuine_evidence = set()
+
+    for item in raw_findings:
+        if not isinstance(item, dict):
+            continue
+        category = item.get("category")
+        description = item.get("description")
+        if category not in _ALLOWED_FINDING_CATEGORIES:
+            continue
+        if not isinstance(description, str) or not description.strip():
+            continue
+        description = description.strip()
+
+        if _is_content_completeness_finding(description):
+            # Explicitly ignored: content/pagination/footnote/placeholder-only observation.
+            continue
+
+        genuine_findings.append((category, description))
+        categories_with_genuine_evidence.add(category)
+
+    result: Dict[str, Any] = {}
+    for key in _VISUAL_CHECK_KEYS:
+        model_value = parsed[key]
+        if model_value == STATUS_FAIL and key not in categories_with_genuine_evidence:
+            # The model claimed FAIL but every attached finding for this category was
+            # content/pagination noise (or no finding was attached at all) -> no genuine
+            # visual defect survives, so this is not a real fidelity failure.
+            result[key] = STATUS_PASS
+        else:
+            result[key] = model_value
+
+    result["overall_visual_fidelity"] = STATUS_FAIL if any(
+        result[key] == STATUS_FAIL for key in _VISUAL_CHECK_KEYS
+    ) else STATUS_PASS
+    # Only surface findings whose category is still FAIL after the filter, so a downgraded
+    # (now-PASS) category never leaves a stray "issue" string behind.
+    result["issues"] = [desc for cat, desc in genuine_findings if result[cat] == STATUS_FAIL]
+    return result
 
 
 class GreenNodeVisualQAAgent:
@@ -638,10 +786,10 @@ class GreenNodeVisualQAAgent:
                     {
                         "type": "text",
                         "text": (
-                            f"Page {page_num}. Compare ONLY formatting/layout fidelity. "
-                            "Image 1 = authoritative MB07 template (reference). "
-                            "Image 2 = generated proposal (may contain different customer content, which is expected). "
-                            "Return strict JSON only."
+                            f"Page {page_num}. Compare ONLY formatting/rendering fidelity. "
+                            "Image 1 = authoritative MB07 template (style/layout reference only). "
+                            "Image 2 = generated proposal (different customer content and pagination are "
+                            "expected and must never be reported). Return strict JSON only."
                         ),
                     },
                     {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{template_b64_png}"}},
@@ -650,19 +798,62 @@ class GreenNodeVisualQAAgent:
             },
         ]
 
-        start_time = time.perf_counter()
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.0,
-                max_tokens=1024,
-            )
-        except Exception as exc:
-            self._record_telemetry(page_num, (time.perf_counter() - start_time) * 1000.0, success=False, error=str(exc))
-            raise GreenNodeVisionQAError(
-                f"GreenNode visual QA API call failed for page {page_num} (fail-closed): {exc}"
-            ) from exc
+        # Only the network/API call itself is retried, and only for the retryable HTTP
+        # status codes below. A successful HTTP call that returns empty/malformed content
+        # is NEVER retried — it fails closed immediately (see below, outside this loop).
+        response = None
+        for attempt in range(1, MAX_VISUAL_QA_ATTEMPTS + 1):
+            start_time = time.perf_counter()
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=0.0,
+                    max_tokens=1024,
+                )
+                break
+            except Exception as exc:
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+                status_code = getattr(exc, "status_code", None)
+                retryable = status_code in RETRYABLE_STATUS_CODES
+
+                if retryable and attempt < MAX_VISUAL_QA_ATTEMPTS:
+                    wait_seconds = self._compute_retry_wait_seconds(exc, attempt)
+                    logger.warning(
+                        "GreenNode visual QA page %s: retryable HTTP %s on attempt %d/%d, "
+                        "waiting %.2fs before retry.",
+                        page_num, status_code, attempt, MAX_VISUAL_QA_ATTEMPTS, wait_seconds,
+                    )
+                    self._record_telemetry(
+                        page_num, latency_ms, success=False,
+                        error=f"HTTP {status_code} (retrying, attempt {attempt}/{MAX_VISUAL_QA_ATTEMPTS})",
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+
+                if retryable:
+                    # Exhausted all retry attempts on a retryable error -> fail closed.
+                    logger.warning(
+                        "GreenNode visual QA page %s: retry attempts exhausted (%d/%d) after HTTP %s.",
+                        page_num, attempt, MAX_VISUAL_QA_ATTEMPTS, status_code,
+                    )
+                    self._record_telemetry(
+                        page_num, latency_ms, success=False,
+                        error=f"HTTP {status_code} (retry exhausted)",
+                    )
+                    raise GreenNodeVisionQAError(
+                        f"GreenNode visual QA rate limit/retry exhausted for page {page_num} "
+                        f"after {MAX_VISUAL_QA_ATTEMPTS} attempts (last HTTP {status_code})."
+                    ) from exc
+
+                # Non-retryable error: fail closed immediately, no retry.
+                self._record_telemetry(
+                    page_num, latency_ms, success=False,
+                    error=f"HTTP {status_code}" if status_code is not None else "non-retryable error",
+                )
+                raise GreenNodeVisionQAError(
+                    f"GreenNode visual QA API call failed for page {page_num} (fail-closed, non-retryable): {exc}"
+                ) from exc
 
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         content = response.choices[0].message.content if response.choices else None
@@ -674,6 +865,26 @@ class GreenNodeVisualQAAgent:
         parsed = _validate_visual_schema(parsed_raw, page_num)
         self._record_telemetry(page_num, latency_ms, success=True)
         return parsed
+
+    @staticmethod
+    def _compute_retry_wait_seconds(exc: Exception, attempt: int) -> float:
+        """Respects a server-provided Retry-After header when present; otherwise falls back
+        to the approximate exponential backoff schedule (2s, 5s, 10s) plus small jitter."""
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None) if response is not None else None
+        if headers is not None:
+            try:
+                raw_retry_after = headers.get("Retry-After")
+            except Exception:
+                raw_retry_after = None
+            if raw_retry_after is not None:
+                try:
+                    return max(0.0, float(raw_retry_after))
+                except (TypeError, ValueError):
+                    pass
+
+        schedule_index = min(attempt - 1, len(_RETRY_BACKOFF_SCHEDULE_SECONDS) - 1)
+        return _RETRY_BACKOFF_SCHEDULE_SECONDS[schedule_index] + random.uniform(0.0, _RETRY_JITTER_MAX_SECONDS)
 
     def _record_telemetry(self, page_num: int, latency_ms: float, success: bool, error: Optional[str] = None) -> None:
         try:
@@ -737,6 +948,7 @@ class DocumentQAAgent:
         vision_agent_factory: Optional[Any] = None,
         max_visual_pages: Optional[int] = None,
         render_dpi: Optional[int] = None,
+        page_delay_seconds: Optional[float] = None,
     ):
         self.template_path = template_path or DEFAULT_AUTHORITATIVE_TEMPLATE_PATH
         self.dynamic_table_rules = dynamic_table_rules if dynamic_table_rules is not None else DEFAULT_DYNAMIC_TABLE_RULES
@@ -744,6 +956,7 @@ class DocumentQAAgent:
         self.vision_agent_factory = vision_agent_factory or GreenNodeVisualQAAgent
         self.max_visual_pages = max_visual_pages if max_visual_pages is not None else DEFAULT_VISUAL_QA_MAX_PAGES
         self.render_dpi = render_dpi if render_dpi is not None else DEFAULT_RENDER_DPI
+        self.page_delay_seconds = page_delay_seconds if page_delay_seconds is not None else DEFAULT_PAGE_DELAY_SECONDS
 
     def run_qa(self, generated_docx_path: str) -> Dict[str, Any]:
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -819,6 +1032,11 @@ class DocumentQAAgent:
 
                     for item in page_result.get("issues", []) or []:
                         issues.append(f"[page {i + 1}] {item}")
+
+                    # Small pacing delay between successful page calls (separate from retry
+                    # backoff) to stay comfortably under GreenNode rate limits.
+                    if self.page_delay_seconds > 0 and i < page_pairs - 1:
+                        time.sleep(self.page_delay_seconds)
             except GreenNodeVisionQAError as exc:
                 issues.append(f"GreenNode visual QA failed (fail-closed): {exc}")
                 return _build_result(
