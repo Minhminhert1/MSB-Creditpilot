@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
-from typing import Any
+from typing import Any, Dict, List, Optional, Tuple
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -1422,59 +1422,41 @@ HTML_PAGE = """<!DOCTYPE html>
     <!-- ========================================================================= -->
     <section id="tab-narrative" class="hidden space-y-6">
       <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
-        <div class="flex items-center justify-between border-b pb-3">
+        <!-- HEADER & WORKFLOW STATUS -->
+        <div class="flex flex-col md:flex-row md:items-center justify-between border-b pb-4 gap-4">
           <div>
-            <h3 class="font-bold text-base text-[#003366]">📝 Phê Duyệt & Biên Tập Narrative Tờ Trình MB07</h3>
-            <p class="text-xs text-slate-500">Bản thảo do AI soạn thảo dựa trên 100% Fact Đã Xác Nhận & Verified Insights</p>
+            <div class="flex items-center space-x-3">
+              <h3 class="font-bold text-base text-[#003366]">📝 Phê Duyệt & Biên Tập Narrative Tờ Trình MB07</h3>
+              <span id="narrative-status-badge" class="text-xs font-bold px-2.5 py-0.5 rounded border border-slate-300 bg-slate-100 text-slate-600">
+                Chờ Kiểm Tra
+              </span>
+            </div>
+            <p class="text-xs text-slate-500 mt-1">Quy trình 3 lớp: AI Phát hiện ➔ Python Đối soát độc lập ➔ RM Phê duyệt (FactManifest SHA-256)</p>
           </div>
-          <button onclick="acceptAllNarrative()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow flex items-center space-x-1.5">
-            <span>✔️ RM Phê Duyệt Toàn Bộ Bản Thảo</span>
-          </button>
+          <div id="narrative-header-actions" class="flex items-center space-x-2">
+            <!-- Dynamic Action Buttons (Tạo Nhận Định AI / Phê Duyệt / Tạo Lại) -->
+          </div>
+        </div>
+
+        <!-- STATE NOTIFICATION / BANNER AREA -->
+        <div id="narrative-alert-container"></div>
+
+        <!-- TELEMETRY / AUDIT STRIP (shown when draft exists) -->
+        <div id="narrative-telemetry-strip" class="hidden p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-600 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center space-x-2">
+            <span class="font-bold text-slate-700">Mô hình AI:</span>
+            <span id="narrative-model-label" class="bg-purple-100 text-purple-800 font-mono px-2 py-0.5 rounded font-bold"></span>
+          </div>
+          <div class="flex items-center space-x-3">
+            <span id="narrative-manifest-hash" class="font-mono text-slate-500">Hash: -</span>
+            <span id="narrative-insights-count" class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded font-semibold">0 Insights</span>
+            <span id="narrative-blocks-count" class="bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-semibold">0 Blocks</span>
+          </div>
         </div>
 
         <!-- NARRATIVE BLOCKS CONTAINER -->
         <div class="space-y-4" id="narrative-blocks-container">
-          <!-- BLOCK 1: PNL -->
-          <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2.5">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center space-x-2">
-                <span class="text-sm font-bold text-slate-900">📈 Phân Tích Kết Quả Kinh Doanh (PnL Analysis)</span>
-                <span class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">Grounded AI Draft</span>
-              </div>
-              <span class="text-xs text-emerald-700 font-semibold">✓ Đã phê duyệt cho MB07</span>
-            </div>
-            <p class="text-xs text-slate-700 bg-white p-3.5 rounded-lg border border-slate-200 leading-relaxed" id="narr-text-pnl">
-              Doanh thu thuần năm 2025 bứt phá đạt 7.819,4 tỷ đồng (tăng trưởng 37,1% so với năm 2024 đạt 5.702,5 tỷ đồng) nhờ mở rộng phân phối các dòng sản phẩm công nghệ chủ lực. Biên lợi nhuận gộp duy trì ổn định ở mức 5,2%, lợi nhuận sau thuế đạt 134,2 tỷ đồng (tăng trưởng 49,6%).
-            </p>
-            <div class="flex items-center justify-between text-[11px] text-slate-500">
-              <div class="flex space-x-2">
-                <span class="bg-slate-200 px-2 py-0.5 rounded">Facts: FIN_REV_2024, FIN_REV_2025</span>
-                <span class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">Insight: INS_REV_GROWTH_37.1%</span>
-              </div>
-              <button onclick="editNarrativeBlock('pnl_analysis')" class="text-blue-700 hover:underline font-semibold">✏️ RM Chỉnh sửa</button>
-            </div>
-          </div>
-
-          <!-- BLOCK 2: CIC -->
-          <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2.5">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center space-x-2">
-                <span class="text-sm font-bold text-slate-900">🏦 Đánh Giá Quan Hệ Tín Dụng & Lịch Sử CIC</span>
-                <span class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded">Grounded AI Draft</span>
-              </div>
-              <span class="text-xs text-emerald-700 font-semibold">✓ Đã phê duyệt cho MB07</span>
-            </div>
-            <p class="text-xs text-slate-700 bg-white p-3.5 rounded-lg border border-slate-200 leading-relaxed" id="narr-text-cic">
-              Khách hàng DEMO DISTRIBUTION JSC duy trì quan hệ tín dụng chuẩn mực, dư nợ hiện hữu tại MSB là 499.999 triệu VND (100% Nhóm 1). Lịch sử trả nợ tại MSB và các TCTD khác trong 24 tháng liên tục không phát sinh bất kỳ khoản nợ quá hạn nào. Doanh số dòng tiền chuyển về MSB luôn vượt cam kết hạn mức.
-            </p>
-            <div class="flex items-center justify-between text-[11px] text-slate-500">
-              <div class="flex space-x-2">
-                <span class="bg-slate-200 px-2 py-0.5 rounded">Facts: CIC_MSB_OUTSTANDING, CIC_HISTORY_STATUS</span>
-                <span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded">Status: EXCELLENT</span>
-              </div>
-              <button onclick="editNarrativeBlock('cic_summary')" class="text-blue-700 hover:underline font-semibold">✏️ RM Chỉnh sửa</button>
-            </div>
-          </div>
+          <!-- Dynamically populated by renderNarrativeUI() -->
         </div>
 
         <!-- HERO GENERATE BUTTON & DOWNLOAD STATUS -->
@@ -1530,16 +1512,24 @@ HTML_PAGE = """<!DOCTYPE html>
   <div id="modal-edit-narrative" class="hidden fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
     <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4">
       <div class="flex justify-between items-center border-b pb-3">
-        <h3 class="font-bold text-base text-[#003366]">✏️ Chỉnh Sửa & Tái Thẩm Định Bản Thảo Narrative</h3>
+        <div>
+          <h3 class="font-bold text-base text-[#003366]">✏️ Chỉnh Sửa & Tái Thẩm Định Bản Thảo Narrative</h3>
+          <p id="modal-narr-target-title" class="text-xs text-slate-500"></p>
+        </div>
         <button onclick="closeEditModal()" class="text-slate-400 hover:text-slate-600 font-bold text-lg">&times;</button>
       </div>
+      <div id="modal-narr-error" class="hidden p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg"></div>
       <div class="space-y-2">
-        <label class="text-xs font-semibold text-slate-600">Nội dung đoạn văn:</label>
-        <textarea id="modal-narr-text" rows="5" class="w-full p-3 text-xs border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:outline-none"></textarea>
+        <label class="text-xs font-semibold text-slate-600">Nội dung đoạn văn (sẽ được đối soát tự động qua Python Verifier):</label>
+        <textarea id="modal-narr-text" rows="6" class="w-full p-3 text-xs border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:outline-none leading-relaxed"></textarea>
+      </div>
+      <div class="space-y-1">
+        <label class="text-xs font-semibold text-slate-600">Ghi chú giải trình của RM (tùy chọn):</label>
+        <input type="text" id="modal-narr-rm-note" placeholder="VD: Bổ sung chi tiết giải trình theo yêu cầu cấp thẩm quyền..." class="w-full p-2 text-xs border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:outline-none">
       </div>
       <div class="flex justify-end space-x-2 pt-2">
         <button onclick="closeEditModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">Hủy</button>
-        <button onclick="saveAndRevalidateNarrative()" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow">
+        <button onclick="saveAndRevalidateNarrative()" id="btn-modal-save" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow">
           ✓ Lưu & Tái Thẩm Định
         </button>
       </div>
@@ -1662,6 +1652,9 @@ HTML_PAGE = """<!DOCTYPE html>
 
       if (tabId === 'tab-committee') {
         loadCommitteeCards();
+      }
+      if (tabId === 'tab-narrative') {
+        loadNarrativeState(CURRENT_CASE_ID);
       }
     }
 
@@ -2739,6 +2732,7 @@ HTML_PAGE = """<!DOCTYPE html>
         });
         await loadCaseData();
         if (CURRENT_ACTIVE_TAB === 'tab-committee') loadCommitteeCards();
+        if (CURRENT_ACTIVE_TAB === 'tab-narrative') loadNarrativeState(cid);
         alert(`⚡ Đã nạp lại dữ liệu demo chuẩn cho hồ sơ '${cid}'!`);
       } catch (e) {
         alert('Lỗi reset demo: ' + e.message);
@@ -2770,38 +2764,536 @@ HTML_PAGE = """<!DOCTYPE html>
           ['legal', 'business', 'financial', 'cic'].forEach(k => updateDocCardUI(k));
           await loadCaseData();
           if (CURRENT_ACTIVE_TAB === 'tab-committee') loadCommitteeCards();
+          if (CURRENT_ACTIVE_TAB === 'tab-narrative') loadNarrativeState(caseId);
         }
       } catch (e) {
         console.error(e);
       }
     }
 
-    function acceptAllNarrative() {
-      alert('✔️ RM đã phê duyệt toàn bộ các đoạn văn bản phân tích tín dụng cho Tờ trình MB07!');
+    function escapeHtml(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
     }
 
-    let CURRENT_EDIT_BLOCK = null;
-    function editNarrativeBlock(target) {
-      CURRENT_EDIT_BLOCK = target;
+    let NARRATIVE_STATE = {
+      caseId: null,
+      generationId: null,
+      status: null, // 'NOT_READY' | 'READY' | 'GENERATING' | 'DRAFT' | 'ACCEPTED'
+      isGenerating: false,
+      manifestHash: null,
+      model: null,
+      generationSource: null,
+      narrativeReady: false,
+      readinessReason: null,
+      blocks: [],
+      verifiedInsights: [],
+      error: null
+    };
+
+    let EDITING_BLOCK_TARGET = null;
+    let EDITING_BLOCK_ORIGINAL_TEXT = null;
+
+    function checkCaseFactsReadiness() {
+      return {
+        ready: !!NARRATIVE_STATE.narrativeReady,
+        reason: NARRATIVE_STATE.readinessReason || "Chưa đủ dữ liệu canonical để tạo nhận định."
+      };
+    }
+
+    async function loadNarrativeState(caseId) {
+      const cid = caseId || CURRENT_CASE_ID || 'PSD';
+      NARRATIVE_STATE.caseId = cid;
+
+      try {
+        const res = await fetch(`/api/narrative/status?case_id=${encodeURIComponent(cid)}`);
+        const data = await res.json();
+
+        if (data.status === 'success') {
+          NARRATIVE_STATE.narrativeReady = !!data.narrative_ready;
+          NARRATIVE_STATE.readinessReason = data.readiness_reason || null;
+          NARRATIVE_STATE.model = data.model || null;
+          NARRATIVE_STATE.generationSource = data.generation_source || null;
+
+          if (data.has_draft && data.blocks && data.blocks.length > 0) {
+            NARRATIVE_STATE.generationId = data.generation_id;
+            NARRATIVE_STATE.status = (data.draft_status === 'ACCEPTED_FOR_RENDERING') ? 'ACCEPTED' : 'DRAFT';
+            NARRATIVE_STATE.blocks = data.blocks;
+            NARRATIVE_STATE.verifiedInsights = data.verified_insights || [];
+            NARRATIVE_STATE.manifestHash = data.manifest_hash || (data.generation_id ? data.generation_id.slice(0, 16) : '-');
+            NARRATIVE_STATE.error = null;
+          } else {
+            const isReady = NARRATIVE_STATE.narrativeReady;
+            NARRATIVE_STATE.generationId = null;
+            NARRATIVE_STATE.status = isReady ? 'READY' : 'NOT_READY';
+            NARRATIVE_STATE.blocks = [];
+            NARRATIVE_STATE.verifiedInsights = [];
+            NARRATIVE_STATE.manifestHash = null;
+            NARRATIVE_STATE.error = isReady ? null : NARRATIVE_STATE.readinessReason;
+          }
+        } else {
+          NARRATIVE_STATE.narrativeReady = false;
+          NARRATIVE_STATE.readinessReason = data.message || "Không thể kiểm tra trạng thái hồ sơ.";
+          NARRATIVE_STATE.status = 'NOT_READY';
+          NARRATIVE_STATE.error = NARRATIVE_STATE.readinessReason;
+        }
+      } catch (err) {
+        console.warn("Could not load narrative status:", err);
+        NARRATIVE_STATE.narrativeReady = false;
+        NARRATIVE_STATE.status = 'NOT_READY';
+        NARRATIVE_STATE.blocks = [];
+        NARRATIVE_STATE.error = "Không thể kết nối máy chủ để kiểm tra trạng thái: " + err.message;
+      }
+      renderNarrativeUI();
+    }
+
+    async function generateNarrative() {
+      if (NARRATIVE_STATE.isGenerating) {
+        return;
+      }
+
+      const readiness = checkCaseFactsReadiness();
+      if (!readiness.ready) {
+        NARRATIVE_STATE.status = 'NOT_READY';
+        NARRATIVE_STATE.error = readiness.reason || "Chưa đủ dữ liệu canonical để tạo nhận định.";
+        renderNarrativeUI();
+        return;
+      }
+
+      NARRATIVE_STATE.isGenerating = true;
+      NARRATIVE_STATE.status = 'GENERATING';
+      NARRATIVE_STATE.error = null;
+      NARRATIVE_STATE.blocks = [];
+      renderNarrativeUI();
+
+      try {
+        const res = await fetch('/api/narrative/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ case_id: CURRENT_CASE_ID })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.status === 'success') {
+          NARRATIVE_STATE.isGenerating = false;
+          NARRATIVE_STATE.status = 'DRAFT';
+          NARRATIVE_STATE.generationId = data.generation_id;
+          NARRATIVE_STATE.manifestHash = data.manifest_hash;
+          NARRATIVE_STATE.model = data.model || null;
+          NARRATIVE_STATE.generationSource = data.generation_source || null;
+          NARRATIVE_STATE.blocks = data.blocks || [];
+          NARRATIVE_STATE.verifiedInsights = data.verified_insights || [];
+          NARRATIVE_STATE.error = null;
+        } else {
+          NARRATIVE_STATE.isGenerating = false;
+          NARRATIVE_STATE.status = NARRATIVE_STATE.narrativeReady ? 'READY' : 'NOT_READY';
+          NARRATIVE_STATE.error = data.message || "Không thể tạo nhận định AI. Vui lòng kiểm tra dữ liệu đã xác nhận và thử lại.";
+        }
+      } catch (err) {
+        NARRATIVE_STATE.isGenerating = false;
+        NARRATIVE_STATE.status = NARRATIVE_STATE.narrativeReady ? 'READY' : 'NOT_READY';
+        NARRATIVE_STATE.error = "Không thể kết nối đến máy chủ AI: " + err.message;
+      }
+
+      renderNarrativeUI();
+    }
+
+    async function acceptNarrative() {
+      if (!NARRATIVE_STATE.generationId) {
+        alert("Không tìm thấy mã bản thảo (generation_id) để xác nhận.");
+        return;
+      }
+
+      const btn = document.getElementById('btn-narrative-accept');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳ Đang ghi nhận phê duyệt...</span>';
+      }
+
+      try {
+        const res = await fetch('/api/narrative/accept', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            generation_id: NARRATIVE_STATE.generationId,
+            case_id: CURRENT_CASE_ID,
+            rm_reviewer_name: "RM Thẩm định"
+          })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.status === 'success') {
+          NARRATIVE_STATE.status = 'ACCEPTED';
+          NARRATIVE_STATE.error = null;
+          renderNarrativeUI();
+          alert('✔️ RM đã phê duyệt toàn bộ các đoạn văn bản phân tích tín dụng cho Tờ trình MB07!');
+        } else {
+          alert('Không thể xác nhận nhận định: ' + (data.message || 'Lỗi không xác định'));
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<span>✔️ RM Phê Duyệt Toàn Bộ Bản Thảo</span>';
+          }
+        }
+      } catch (err) {
+        alert('Lỗi kết nối khi phê duyệt nhận định: ' + err.message);
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>✔️ RM Phê Duyệt Toàn Bộ Bản Thảo</span>';
+        }
+      }
+    }
+
+    function openEditNarrativeModal(targetBinding) {
+      const block = NARRATIVE_STATE.blocks.find(b => b.target_binding === targetBinding);
+      if (!block) {
+        console.error("Block not found for target_binding:", targetBinding);
+        return;
+      }
+
+      EDITING_BLOCK_TARGET = targetBinding;
+      EDITING_BLOCK_ORIGINAL_TEXT = block.text;
+
       const modal = document.getElementById('modal-edit-narrative');
-      const textEl = target === 'pnl_analysis' ? document.getElementById('narr-text-pnl') : document.getElementById('narr-text-cic');
-      document.getElementById('modal-narr-text').value = textEl ? textEl.innerText.trim() : '';
-      modal.classList.remove('hidden');
+      const targetTitleEl = document.getElementById('modal-narr-target-title');
+      const textEl = document.getElementById('modal-narr-text');
+      const noteEl = document.getElementById('modal-narr-rm-note');
+      const errEl = document.getElementById('modal-narr-error');
+
+      if (targetTitleEl) targetTitleEl.innerText = `${block.title || targetBinding} [${block.target_binding}]`;
+      if (textEl) textEl.value = block.text;
+      if (noteEl) noteEl.value = '';
+      if (errEl) { errEl.innerText = ''; errEl.classList.add('hidden'); }
+
+      if (modal) modal.classList.remove('hidden');
     }
 
     function closeEditModal() {
-      document.getElementById('modal-edit-narrative').classList.add('hidden');
+      const modal = document.getElementById('modal-edit-narrative');
+      if (modal) modal.classList.add('hidden');
+      EDITING_BLOCK_TARGET = null;
+      EDITING_BLOCK_ORIGINAL_TEXT = null;
     }
 
-    function saveAndRevalidateNarrative() {
-      const newText = document.getElementById('modal-narr-text').value.trim();
-      if (CURRENT_EDIT_BLOCK === 'pnl_analysis') {
-        document.getElementById('narr-text-pnl').innerText = newText;
-      } else if (CURRENT_EDIT_BLOCK === 'cic_summary') {
-        document.getElementById('narr-text-cic').innerText = newText;
+    async function saveAndRevalidateNarrative() {
+      if (!EDITING_BLOCK_TARGET || !NARRATIVE_STATE.generationId) {
+        closeEditModal();
+        return;
       }
-      closeEditModal();
-      alert('✓ Đã lưu và tái thẩm định thành công đoạn văn bản!');
+
+      const textEl = document.getElementById('modal-narr-text');
+      const noteEl = document.getElementById('modal-narr-rm-note');
+      const errEl = document.getElementById('modal-narr-error');
+      const saveBtn = document.getElementById('btn-modal-save');
+
+      const newText = textEl ? textEl.value.trim() : '';
+      const rmNote = noteEl ? noteEl.value.trim() : '';
+
+      if (!newText) {
+        if (errEl) {
+          errEl.innerText = 'Nội dung nhận định không được để trống.';
+          errEl.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerText = '⏳ Đang tái thẩm định...';
+      }
+
+      try {
+        const res = await fetch('/api/narrative/edit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            generation_id: NARRATIVE_STATE.generationId,
+            target_binding: EDITING_BLOCK_TARGET,
+            edited_text: newText,
+            rm_note: rmNote
+          })
+        });
+        const data = await res.json();
+
+        if (res.ok && data.status === 'success') {
+          const block = NARRATIVE_STATE.blocks.find(b => b.target_binding === EDITING_BLOCK_TARGET);
+          if (block) {
+            block.text = newText;
+            block._rm_edited = true;
+          }
+          closeEditModal();
+          renderNarrativeUI();
+          alert('✓ Đã lưu và tái thẩm định thành công đoạn văn bản!');
+        } else {
+          if (errEl) {
+            errEl.innerText = 'Lỗi tái thẩm định: ' + (data.message || 'Không thể áp dụng chỉnh sửa.');
+            errEl.classList.remove('hidden');
+          }
+        }
+      } catch (err) {
+        if (errEl) {
+          errEl.innerText = 'Lỗi kết nối máy chủ: ' + err.message;
+          errEl.classList.remove('hidden');
+        }
+      } finally {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerText = '✓ Lưu & Tái Thẩm Định';
+        }
+      }
+    }
+
+    function renderNarrativeUI() {
+      const badgeEl = document.getElementById('narrative-status-badge');
+      const actionsEl = document.getElementById('narrative-header-actions');
+      const alertEl = document.getElementById('narrative-alert-container');
+      const telemetryEl = document.getElementById('narrative-telemetry-strip');
+      const containerEl = document.getElementById('narrative-blocks-container');
+
+      if (!badgeEl || !actionsEl || !alertEl || !containerEl) return;
+
+      const state = NARRATIVE_STATE.status || 'READY';
+
+      switch (state) {
+        case 'NOT_READY':
+          badgeEl.className = 'text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-0.5 rounded border border-slate-300';
+          badgeEl.innerText = 'Chưa Đủ Dữ Liệu';
+          actionsEl.innerHTML = `
+            <button disabled class="px-4 py-2 bg-slate-200 text-slate-400 rounded-lg text-xs font-bold cursor-not-allowed flex items-center space-x-1.5" title="Cần tối thiểu thông tin pháp lý và BCTC đã xác nhận">
+              <span>🚀 Tạo Nhận Định AI</span>
+            </button>
+          `;
+          alertEl.innerHTML = `
+            <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-start space-x-3">
+              <span class="text-base">⚠️</span>
+              <div>
+                <div class="font-bold text-amber-900 mb-1">Chưa đủ dữ liệu để tạo nhận định.</div>
+                <p class="leading-relaxed">${escapeHtml(NARRATIVE_STATE.error || 'Hồ sơ chưa có đủ dữ liệu canonical (tên doanh nghiệp và BCTC). Vui lòng chuyển sang tab [📂 2. Không Gian Tài Liệu] để tải lên và đối soát tài liệu trước khi tạo nhận định AI.')}</p>
+              </div>
+            </div>
+          `;
+          if (telemetryEl) telemetryEl.classList.add('hidden');
+          break;
+
+        case 'READY':
+          badgeEl.className = 'text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-0.5 rounded border border-blue-200';
+          badgeEl.innerText = 'Sẵn Sàng Tạo Nhận Định';
+          actionsEl.innerHTML = `
+            <button onclick="generateNarrative()" id="btn-narrative-generate" class="px-4 py-2 bg-[#003366] hover:bg-blue-900 text-white rounded-lg text-xs font-bold shadow flex items-center space-x-1.5 transition">
+              <span>🚀 Tạo Nhận Định AI</span>
+            </button>
+          `;
+          if (NARRATIVE_STATE.error) {
+            alertEl.innerHTML = `
+              <div class="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-start space-x-3">
+                <span class="text-base">❌</span>
+                <div>
+                  <div class="font-bold text-red-900 mb-1">Không thể tạo nhận định AI.</div>
+                  <p class="leading-relaxed">${escapeHtml(NARRATIVE_STATE.error)}</p>
+                </div>
+              </div>
+            `;
+          } else {
+            alertEl.innerHTML = `
+              <div class="p-4 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800 flex items-start space-x-3">
+                <span class="text-base">💡</span>
+                <div>
+                  <div class="font-bold text-blue-900 mb-1">Dữ liệu canonical đủ để tạo nhận định.</div>
+                  <p class="leading-relaxed">Bấm <strong>"Tạo Nhận Định AI"</strong> để kích hoạt luồng: FactManifest SHA-256 ➔ GreenNode Insight Discovery ➔ Python Verifier ➔ Grounded Narrative Writer ➔ Deterministic Validator.</p>
+                </div>
+              </div>
+            `;
+          }
+          if (telemetryEl) telemetryEl.classList.add('hidden');
+          break;
+
+        case 'GENERATING':
+          badgeEl.className = 'text-xs bg-purple-100 text-purple-800 font-bold px-2.5 py-0.5 rounded animate-pulse border border-purple-200';
+          badgeEl.innerText = '🤖 AI Đang Phân Tích...';
+          actionsEl.innerHTML = `
+            <button disabled class="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold cursor-not-allowed flex items-center space-x-1.5 animate-pulse border border-purple-200">
+              <span>⏳ Đang Tạo Nhận Định...</span>
+            </button>
+          `;
+          alertEl.innerHTML = `
+            <div class="p-4 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-900 flex items-start space-x-3 animate-pulse">
+              <span class="text-base">⏳</span>
+              <div>
+                <div class="font-bold mb-1">AI đang tổng hợp dữ liệu đã xác nhận và xây dựng nhận định...</div>
+                <p class="leading-relaxed">Đang chạy: Đóng gói FactManifest ➔ GLM-5.2 Insight Discovery ➔ Đối soát công thức toán độc lập bằng Python ➔ Soạn thảo văn bản Grounded Narrative ➔ Kiểm định tính toàn vẹn MB07.</p>
+              </div>
+            </div>
+          `;
+          if (telemetryEl) telemetryEl.classList.add('hidden');
+          break;
+
+        case 'DRAFT':
+          badgeEl.className = 'text-xs bg-amber-100 text-amber-800 font-bold px-2.5 py-0.5 rounded border border-amber-300';
+          badgeEl.innerText = 'AI Draft — Chờ RM xác nhận';
+          actionsEl.innerHTML = `
+            <button onclick="acceptNarrative()" id="btn-narrative-accept" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow flex items-center space-x-1.5 transition">
+              <span>✔️ RM Phê Duyệt Toàn Bộ Bản Thảo</span>
+            </button>
+            <button onclick="generateNarrative()" id="btn-narrative-regenerate" class="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-sm transition flex items-center space-x-1">
+              <span>🔄 Tạo Lại</span>
+            </button>
+          `;
+          alertEl.innerHTML = `
+            <div class="p-4 bg-amber-50/70 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-start justify-between gap-3">
+              <div class="flex items-start space-x-3">
+                <span class="text-base">📋</span>
+                <div>
+                  <div class="font-bold mb-1">Bản thảo AI đã tạo thành công — Đang ở trạng thái Draft chờ RM thẩm định.</div>
+                  <p class="leading-relaxed text-amber-800">Bản thảo chưa được ghi nhận vào Tờ trình chính thức. RM có thể kiểm tra từng đoạn văn bản, bấm <strong>"✏️ RM Chỉnh sửa"</strong> để hiệu chỉnh và tái thẩm định, hoặc bấm <strong>"✔️ RM Phê Duyệt Toàn Bộ"</strong> để khóa số liệu và gắn kết vào Tờ trình MB07.</p>
+                </div>
+              </div>
+            </div>
+          `;
+          if (telemetryEl) {
+            telemetryEl.classList.remove('hidden');
+            const modelEl = document.getElementById('narrative-model-label');
+            const hashEl = document.getElementById('narrative-manifest-hash');
+            const insCountEl = document.getElementById('narrative-insights-count');
+            const blkCountEl = document.getElementById('narrative-blocks-count');
+            if (modelEl) {
+              const modelName = NARRATIVE_STATE.model;
+              if (modelName) {
+                modelEl.innerText = modelName;
+              } else if (NARRATIVE_STATE.generationSource === 'live') {
+                modelEl.innerText = 'AI Backend: Live';
+              } else {
+                modelEl.innerText = 'Model: Không công bố';
+              }
+            }
+            if (hashEl) hashEl.innerText = `Manifest Hash: ${NARRATIVE_STATE.manifestHash ? NARRATIVE_STATE.manifestHash.slice(0, 16) + '...' : '-'}`;
+            if (insCountEl) insCountEl.innerText = `${NARRATIVE_STATE.verifiedInsights.length} Verified Insights`;
+            if (blkCountEl) blkCountEl.innerText = `${NARRATIVE_STATE.blocks.length} Narrative Blocks`;
+          }
+          break;
+
+        case 'ACCEPTED':
+          badgeEl.className = 'text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded border border-emerald-300';
+          badgeEl.innerText = '✓ Đã được RM xác nhận';
+          actionsEl.innerHTML = `
+            <span class="text-xs text-emerald-700 font-bold bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 flex items-center space-x-1.5">
+              <span>✓ Đã được RM xác nhận</span>
+            </span>
+            <button onclick="generateNarrative()" id="btn-narrative-regenerate" class="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-sm transition flex items-center space-x-1">
+              <span>🔄 Tạo Lại Bản Thảo</span>
+            </button>
+          `;
+          alertEl.innerHTML = `
+            <div class="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-900 flex items-start space-x-3">
+              <span class="text-base">✅</span>
+              <div>
+                <div class="font-bold mb-1">Toàn bộ nhận định đã được RM xác nhận cho Tờ trình MB07.</div>
+                <p class="leading-relaxed text-emerald-800">Các đoạn văn bản đã được gắn kết chính thức vào Tờ trình tín dụng. Bấm <strong>"🚀 BẮT ĐẦU TỔNG HỢP & XUẤT BẢN TỜ TRÌNH MB07 (.DOCX)"</strong> phía dưới để tải văn bản Word hoàn chỉnh.</p>
+              </div>
+            </div>
+          `;
+          if (telemetryEl) {
+            telemetryEl.classList.remove('hidden');
+            const modelEl = document.getElementById('narrative-model-label');
+            const hashEl = document.getElementById('narrative-manifest-hash');
+            const insCountEl = document.getElementById('narrative-insights-count');
+            const blkCountEl = document.getElementById('narrative-blocks-count');
+            if (modelEl) {
+              const modelName = NARRATIVE_STATE.model;
+              if (modelName) {
+                modelEl.innerText = modelName;
+              } else if (NARRATIVE_STATE.generationSource === 'live') {
+                modelEl.innerText = 'AI Backend: Live';
+              } else {
+                modelEl.innerText = 'Model: Không công bố';
+              }
+            }
+            if (hashEl) hashEl.innerText = `Manifest Hash: ${NARRATIVE_STATE.manifestHash ? NARRATIVE_STATE.manifestHash.slice(0, 16) + '...' : '-'}`;
+            if (insCountEl) insCountEl.innerText = `${NARRATIVE_STATE.verifiedInsights.length} Verified Insights`;
+            if (blkCountEl) blkCountEl.innerText = `${NARRATIVE_STATE.blocks.length} Narrative Blocks`;
+          }
+          break;
+      }
+
+      if (NARRATIVE_STATE.blocks.length === 0) {
+        if (state === 'GENERATING') {
+          containerEl.innerHTML = `
+            <div class="p-12 text-center text-slate-400 space-y-3 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+              <div class="text-3xl animate-spin inline-block">⚙️</div>
+              <div class="text-xs font-semibold text-slate-600">Đang tổng hợp các chỉ tiêu tài chính và đối soát văn bản...</div>
+            </div>
+          `;
+        } else {
+          containerEl.innerHTML = `
+            <div class="p-10 text-center text-slate-400 space-y-3 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+              <div class="text-3xl">📝</div>
+              <div class="text-sm font-semibold text-slate-700">Chưa có bản thảo nhận định tín dụng nào cho hồ sơ này</div>
+              <p class="text-xs text-slate-500 max-w-md mx-auto">Nhận định tín dụng MB07 sẽ được tự động soạn thảo dựa trên 100% dữ liệu đã xác nhận và các chỉ số tài chính đã được Python kiểm chứng.</p>
+            </div>
+          `;
+        }
+        return;
+      }
+
+      let html = '';
+      NARRATIVE_STATE.blocks.forEach((block, idx) => {
+        const isAccepted = state === 'ACCEPTED';
+        const binding = block.target_binding;
+        const blockId = `narr-block-${binding}`;
+        const textId = `narr-text-${binding}`;
+        const title = block.title || `Nhận Định Tín Dụng (${binding})`;
+        const text = block.text || '';
+        const factsUsed = block.facts_used || [];
+        const insightsUsed = block.insights_used || [];
+        const wasEdited = block._rm_edited || false;
+
+        let statusTag = '';
+        if (isAccepted) {
+          statusTag = '<span class="text-xs text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">✓ Đã được RM xác nhận</span>';
+        } else if (wasEdited) {
+          statusTag = '<span class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded border border-blue-300">✏️ RM Đã Hiệu Chỉnh</span>';
+        } else {
+          statusTag = '<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded border border-amber-300">AI Draft — Chờ RM xác nhận</span>';
+        }
+
+        const factsTagsHtml = factsUsed.slice(0, 3).map(f => `<span class="bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-mono text-[10px]">Fact: ${escapeHtml(f)}</span>`).join(' ');
+        const insightsTagsHtml = insightsUsed.slice(0, 2).map(i => `<span class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded font-mono text-[10px]">Insight: ${escapeHtml(i)}</span>`).join(' ');
+
+        html += `
+          <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2.5 transition hover:border-slate-300" id="${blockId}">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2">
+                <span class="text-sm font-bold text-slate-900">${escapeHtml(title)}</span>
+                <span class="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded border border-indigo-200">Grounded AI</span>
+              </div>
+              <div>${statusTag}</div>
+            </div>
+            <p class="text-xs text-slate-700 bg-white p-3.5 rounded-lg border border-slate-200 leading-relaxed whitespace-pre-line" id="${textId}">${escapeHtml(text)}</p>
+            <div class="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+              <div class="flex flex-wrap gap-1.5 items-center">
+                ${factsTagsHtml}
+                ${insightsTagsHtml}
+              </div>
+              <button onclick="openEditNarrativeModal('${binding}')" class="text-blue-700 hover:text-blue-900 hover:underline font-semibold flex items-center space-x-1">
+                <span>✏️ RM Chỉnh sửa</span>
+              </button>
+            </div>
+          </div>
+        `;
+      });
+
+      containerEl.innerHTML = html;
+    }
+
+    // Backwards-compatibility aliases
+    function acceptAllNarrative() {
+      acceptNarrative();
+    }
+    function editNarrativeBlock(target) {
+      openEditNarrativeModal(target);
     }
 
     async function generateDocx() {
@@ -4188,6 +4680,46 @@ def confirm_business_preview(
     }, 200
 
 
+def is_narrative_case_ready(case_data: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str]]:
+    """Determine whether canonical case data contains sufficient facts for grounded credit narrative generation.
+
+    Server-authoritative readiness invariant:
+    1. case_data must be a valid dict.
+    2. customer.name must be non-empty and not a placeholder.
+    3. section_d.net_revenue must have at least one valid positive canonical value.
+
+    Returns:
+        (True, "Dữ liệu canonical đủ để tạo nhận định.") if ready.
+        (False, <specific Vietnamese explanation>) if not ready.
+    """
+    if case_data is None or not isinstance(case_data, dict) or not case_data:
+        return False, "Chưa đủ dữ liệu canonical để tạo nhận định (hồ sơ rỗng hoặc không tồn tại)."
+
+    cust = case_data.get("customer") or {}
+    if not isinstance(cust, dict):
+        return False, "Chưa đủ dữ liệu canonical để tạo nhận định (thiếu thông tin khách hàng)."
+
+    name = str(cust.get("name") or "").strip()
+    if not name or name.upper() in ("DOANH NGHIỆP MỚI", "CHƯA CẬP NHẬT", "N/A"):
+        return False, "Chưa đủ dữ liệu canonical để tạo nhận định (thiếu tên doanh nghiệp hợp lệ)."
+
+    sec_d = case_data.get("section_d") or {}
+    if not isinstance(sec_d, dict):
+        return False, "Chưa đủ dữ liệu canonical để tạo nhận định (cần tối thiểu số liệu doanh thu thuần từ BCTC)."
+
+    rev = sec_d.get("net_revenue")
+    has_valid_rev = False
+    if isinstance(rev, list):
+        has_valid_rev = any(isinstance(v, (int, float)) and v > 0 for v in rev)
+    elif isinstance(rev, (int, float)) and rev > 0:
+        has_valid_rev = True
+
+    if not has_valid_rev:
+        return False, "Chưa đủ dữ liệu canonical để tạo nhận định (cần tối thiểu số liệu doanh thu thuần từ BCTC)."
+
+    return True, "Dữ liệu canonical đủ để tạo nhận định."
+
+
 class CopilotHTTPHandler(BaseHTTPRequestHandler):
     def _send_json(self, data, status_code=200):
         self.send_response(status_code)
@@ -4375,18 +4907,40 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 return
 
         if path == '/api/narrative/status' or path.startswith('/api/narrative/case/'):
-            cid = path.split('/')[-1] if path.startswith('/api/narrative/case/') else ACTIVE_CASE_ID
+            cid = ACTIVE_CASE_ID
+            if path.startswith('/api/narrative/case/'):
+                cid = path.split('/')[-1]
+            elif '?' in self.path:
+                qstr = self.path.split('?', 1)[1]
+                params = urllib.parse.parse_qs(qstr)
+                if 'case_id' in params:
+                    cid = params['case_id'][0]
+            case_data = CASES_DB.get(cid)
+            is_ready, reason = is_narrative_case_ready(case_data)
             rec = NarrativeDraftManager.get_draft_by_case(cid)
             accepted = NarrativeDraftManager.get_accepted_narratives_for_rendering(cid)
+
+            model_name = None
+            if rec and getattr(rec, "model_id", None):
+                model_name = rec.model_id
+
             self._send_json({
                 "status": "success",
                 "case_id": cid,
+                "narrative_ready": is_ready,
+                "readiness_reason": reason,
                 "has_draft": rec is not None,
                 "generation_id": rec.generation_id if rec else None,
                 "draft_status": rec.status.value if rec else None,
+                "model": model_name,
+                "generation_source": "live" if rec else None,
+                "telemetry": rec.telemetry if rec and getattr(rec, "telemetry", None) else None,
                 "blocks_count": len(rec.blocks) if rec else 0,
                 "accepted_count": len(accepted),
-                "accepted_targets": list(accepted.keys())
+                "accepted_targets": list(accepted.keys()),
+                "manifest_hash": rec.fact_manifest_hash if rec else None,
+                "blocks": [b.model_dump() for b in rec.blocks.values()] if rec else [],
+                "verified_insights": [i.model_dump() for i in rec.verified_insights] if rec else []
             })
             return
 
@@ -5055,6 +5609,13 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "error", "message": f"Hồ sơ {cid} không tồn tại."}, status_code=404)
                 return
             case_data = CASES_DB[cid]
+            is_ready, reason = is_narrative_case_ready(case_data)
+            if not is_ready:
+                self._send_json({
+                    "status": "error",
+                    "message": reason or "Chưa đủ dữ liệu canonical để tạo nhận định."
+                }, status_code=400)
+                return
             try:
                 # 1. Package confirmed canonical facts
                 packager = FactPackager()
@@ -5062,7 +5623,7 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
 
                 # 2. GLM-5.2 Insight Discovery
                 discovery_agent = GLMInsightDiscoveryAgent()
-                candidates = discovery_agent.discover_insights(manifest)
+                candidates, discovery_telemetry = discovery_agent.discover_insights(manifest)
 
                 # 3. Deterministic Python Verifier
                 verifier = PythonInsightVerifier(manifest)
@@ -5070,7 +5631,7 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
 
                 # 4. GLM-5.2 Narrative Writer
                 writer = GLMNarrativeWriterAgent()
-                blocks = writer.generate_narrative(manifest, verified)
+                blocks, writer_telemetry = writer.generate_narrative(manifest, verified)
 
                 # 5. Deterministic Narrative Validator
                 validator = DeterministicNarrativeValidator(manifest, verified)
@@ -5079,26 +5640,36 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 # 6. Store in NARRATIVE_DRAFT_STORE
                 pkg = CreditNarrativePackage(
                     case_id=cid,
-                    manifest_hash=manifest.manifest_hash,
-                    insights=verified,
-                    blocks=blocks
+                    fact_manifest_hash=manifest.manifest_hash,
+                    narrative_blocks=blocks
                 )
+                raw_model = getattr(writer, "model", None)
+                used_model = raw_model if isinstance(raw_model, str) and raw_model else "z-ai/glm-5.2-hackathon"
                 rec = NarrativeDraftManager.create_draft_record(
                     case_id=cid,
                     manifest=manifest,
                     insights=verified,
-                    package=pkg
+                    package=pkg,
+                    model_id=used_model
                 )
+                combined_telemetry = {
+                    "discovery": discovery_telemetry if isinstance(discovery_telemetry, dict) else {},
+                    "writer": writer_telemetry if isinstance(writer_telemetry, dict) else {},
+                }
+                rec.telemetry = combined_telemetry
 
                 self._send_json({
                     "status": "success",
                     "case_id": cid,
                     "generation_id": rec.generation_id,
                     "manifest_hash": manifest.manifest_hash,
+                    "model": rec.model_id,
+                    "generation_source": "live",
+                    "telemetry": combined_telemetry,
                     "verified_insights_count": len(verified),
                     "blocks_count": len(blocks),
                     "is_valid": validation_res.is_valid,
-                    "validation_errors": [e.model_dump() for e in validation_res.errors],
+                    "validation_errors": list(validation_res.errors),
                     "blocks": [b.model_dump() for b in blocks],
                     "verified_insights": [i.model_dump() for i in verified]
                 })
@@ -5128,7 +5699,7 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                     "status": "success",
                     "generation_id": gen_id,
                     "target_binding": target,
-                    "status": updated_rec.status.value
+                    "draft_status": updated_rec.status.value
                 })
             except Exception as ex:
                 self._send_json({"status": "error", "message": str(ex)}, status_code=400)
@@ -5154,7 +5725,7 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                     "status": "success",
                     "generation_id": gen_id,
                     "case_id": cid,
-                    "status": accepted_rec.status.value,
+                    "draft_status": accepted_rec.status.value,
                     "accepted_blocks_count": len(accepted_rec.accepted_block_ids)
                 })
             except Exception as ex:
