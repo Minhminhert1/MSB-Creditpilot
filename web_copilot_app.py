@@ -196,7 +196,7 @@ PORT = int(os.getenv("PORT", 8080))
 CASES_DB = {
     "PSD": {
         "id": "PSD",
-        "name": "PSD - CTCP Dịch vụ Phân phối TH Dầu khí",
+        "name": "PSD - CTCP Phân phối Demo",
         "customer": {
             "name": "CÔNG TY CỔ PHẦN PHÂN PHỐI DEMO",
             "short_name": "DEMO DISTRIBUTION JSC",
@@ -860,192 +860,341 @@ HTML_PAGE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MSB CreditPilot 360 - Trợ lý Thẩm định & Soạn thảo Tờ trình Tín dụng KHDN</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: 'Inter', sans-serif; }
-    .tab-active { border-bottom: 3px solid #EB1C24; color: #003366; font-weight: 700; background-color: #F8FAFC; }
-    .tag-ai { background-color: #DEF7EC; color: #03543F; border: 1px solid #BCF0DA; }
-    .tag-rm { background-color: #FEF08A; color: #713F12; border: 1px solid #FDE047; }
-    .tag-verified { background-color: #E0E7FF; color: #3730A3; border: 1px solid #C7D2FE; }
-    .tag-warning { background-color: #FEF3C7; color: #92400E; border: 1px solid #FDE68A; }
-    .tag-missing { background-color: #FEE2E2; color: #991B1B; border: 1px solid #FECACA; }
-    .badge-hero { background: linear-gradient(135deg, #003366 0%, #004D99 100%); }
-    .card-insight:hover { transform: translateY(-2px); transition: all 0.2s ease-in-out; }
+    /* ==========================================================================
+       CREDITPILOT 360 — DESIGN SYSTEM TOKENS
+       Enterprise banking workspace: restrained palette, consistent spacing/radius.
+       ========================================================================== */
+    :root {
+      --color-primary: #0B2A4A;        /* deep MSB navy */
+      --color-primary-dark: #071B31;
+      --color-accent: #1D5FC2;         /* one strong blue for interactive/primary actions */
+      --color-accent-dark: #164A9B;
+      --color-bg: #F3F5F8;             /* light neutral grey page background */
+      --color-surface: #FFFFFF;
+      --color-border: #E3E8EF;
+      --color-border-strong: #CBD5E1;
+      --color-text: #1B2430;
+      --color-text-muted: #667085;
+      --color-text-faint: #98A2B3;
+      --color-success: #15803D;
+      --color-success-bg: #ECFDF3;
+      --color-success-border: #BBF0D2;
+      --color-warning: #B45309;
+      --color-warning-bg: #FFF8EB;
+      --color-warning-border: #FBE3AE;
+      --color-danger: #B42318;
+      --color-danger-bg: #FEF3F2;
+      --color-danger-border: #F6C7C2;
+      --radius-sm: 8px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06);
+      --shadow-md: 0 2px 8px rgba(16, 24, 40, 0.08);
+      --sidebar-w: 264px;
+      --topbar-h: 60px;
+    }
+
+    * { min-width: 0; }
+    body {
+      font-family: 'Inter', sans-serif;
+      background: var(--color-bg);
+      color: var(--color-text);
+      overflow-wrap: anywhere;
+    }
+    h1, h2, h3, h4 { overflow-wrap: anywhere; }
+
+    /* ---------- Layout shell ---------- */
+    .app-shell { display: flex; min-height: 100vh; }
+    .app-main { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
+    .workspace { flex: 1 1 auto; min-width: 0; width: 100%; max-width: 1180px; margin: 0 auto; padding: 20px 28px 32px; }
+
+    /* ---------- Sidebar ---------- */
+    .sidebar {
+      width: var(--sidebar-w);
+      flex: 0 0 var(--sidebar-w);
+      background: var(--color-primary);
+      color: #E7ECF3;
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      z-index: 40;
+    }
+    .sidebar-brand { padding: 20px 20px 16px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .sidebar-brand-row { display: flex; align-items: center; gap: 10px; }
+    .sidebar-mark {
+      width: 34px; height: 34px; border-radius: var(--radius-sm);
+      background: var(--color-accent); color: #fff; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; font-size: 15px; flex: none;
+    }
+    .sidebar-title { font-size: 14.5px; font-weight: 700; color: #fff; line-height: 1.2; }
+    .sidebar-subtitle { font-size: 11px; color: #93A5C2; margin-top: 2px; line-height: 1.35; }
+
+    .sidebar-nav { flex: 1 1 auto; padding: 10px 10px; display: flex; flex-direction: column; gap: 1px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 9px 10px; border-radius: var(--radius-sm);
+      color: #AEBBD1; text-align: left; width: 100%;
+      font-size: 13px; font-weight: 500; line-height: 1.3;
+      border-left: 3px solid transparent;
+      transition: background-color .15s ease, color .15s ease;
+    }
+    .nav-item:hover { background: rgba(255,255,255,0.06); color: #fff; }
+    .nav-item.tab-active {
+      background: rgba(29, 95, 194, 0.20);
+      color: #fff;
+      font-weight: 600;
+      border-left-color: var(--color-accent);
+    }
+    /* Step indicator glyph: ✓ done · ● active · ○ pending — always reflects real,
+       already-tracked app state (see updateSidebarProgress()), never inferred from
+       unrelated data merely being present. */
+    .nav-item-step {
+      flex: none; width: 18px; height: 18px;
+      color: #5B6B85;
+      font-size: 13px; line-height: 1; display: flex; align-items: center; justify-content: center;
+    }
+    .nav-item-step.is-active { color: var(--color-accent); font-size: 10px; }
+    .nav-item.tab-active .nav-item-step.is-active { color: #fff; }
+    .nav-item-step.is-done { color: #6FCF97; }
+    .nav-item-step.is-pending { color: #4B5A72; }
+    .nav-item-label { flex: 1 1 auto; min-width: 0; }
+
+    .sidebar-footer { padding: 12px 20px 16px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; color: #7C8CA8; }
+
+    /* ---------- Top bar ---------- */
+    .topbar {
+      height: var(--topbar-h);
+      background: var(--color-surface);
+      border-bottom: 1px solid var(--color-border);
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding: 0 24px;
+      position: sticky; top: 0; z-index: 30;
+    }
+    .topbar-left { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 auto; }
+    .topbar-right { display: flex; align-items: center; gap: 8px; flex: none; }
+
+    /* ---------- Buttons (PRIMARY / SECONDARY / GHOST / DANGER) ---------- */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+      height: 36px; padding: 0 14px; border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 600; white-space: nowrap;
+      border: 1px solid transparent; cursor: pointer; transition: background-color .15s ease, border-color .15s ease, opacity .15s ease;
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-sm { height: 30px; padding: 0 10px; font-size: 12px; }
+    .btn-lg { height: 46px; padding: 0 20px; font-size: 14px; }
+    .btn-primary { background: var(--color-accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: var(--color-accent-dark); }
+    .btn-secondary { background: var(--color-surface); color: var(--color-text); border-color: var(--color-border-strong); }
+    .btn-secondary:hover:not(:disabled) { background: #F8FAFC; }
+    .btn-ghost { background: transparent; color: var(--color-text-muted); }
+    .btn-ghost:hover:not(:disabled) { background: #F1F4F8; color: var(--color-text); }
+    .btn-danger { background: var(--color-danger); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #921d13; }
+    .btn-success { background: var(--color-success); color: #fff; }
+    .btn-success:hover:not(:disabled) { background: #106b32; }
+
+    /* ---------- Surfaces ---------- */
+    .panel { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
+    .kpi-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg); padding: 14px 16px; box-shadow: var(--shadow-sm); height: 100%; }
+    .kpi-label { font-size: 12px; color: var(--color-text-muted); font-weight: 500; }
+    .kpi-value { font-size: 22px; font-weight: 700; color: var(--color-text); margin-top: 3px; line-height: 1.2; }
+    .kpi-meta { font-size: 12px; color: var(--color-text-muted); margin-top: 3px; line-height: 1.4; }
+
+    .page-title { font-size: 22px; font-weight: 700; color: var(--color-text); line-height: 1.25; }
+    .page-subtitle { font-size: 13px; color: var(--color-text-muted); margin-top: 2px; }
+    .section-title { font-size: 16px; font-weight: 700; color: var(--color-primary); }
+
+    /* Stable description-list layout: fixed label column, left-aligned value that
+       wraps naturally — never right-aligned, never truncated. */
+    .kv-row { display: flex; align-items: baseline; gap: 14px; padding: 8px 0; border-bottom: 1px solid var(--color-border); }
+    .kv-row:last-child { border-bottom: none; }
+    .kv-label { font-size: 13px; color: var(--color-text-muted); flex: 0 0 168px; }
+    .kv-value { font-size: 13px; font-weight: 600; color: var(--color-text); text-align: left; overflow-wrap: anywhere; line-height: 1.45; flex: 1 1 auto; min-width: 0; }
+
+    /* ---------- Chips / status badges (restrained: success / warning / danger / neutral / info) ---------- */
+    .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
+    .chip-success { background: var(--color-success-bg); color: var(--color-success); border-color: var(--color-success-border); }
+    .chip-warning { background: var(--color-warning-bg); color: var(--color-warning); border-color: var(--color-warning-border); }
+    .chip-danger { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger-border); }
+    .chip-info { background: #EEF3FC; color: var(--color-accent-dark); border-color: #D3E0F5; }
+    .chip-neutral { background: #F1F4F8; color: var(--color-text-muted); border-color: var(--color-border); }
+
+    /* ---------- Text clamping / long-content handling ---------- */
+    .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+    .text-wrap-safe { overflow-wrap: anywhere; word-break: break-word; }
+
+    /* ---------- Tab sections ---------- */
+    .hidden { display: none !important; }
+
+    @media (max-width: 1024px) {
+      .sidebar { width: 76px; flex-basis: 76px; }
+      .sidebar-title, .sidebar-subtitle, .nav-item-label, .sidebar-footer { display: none; }
+      .nav-item { justify-content: center; }
+      .workspace { padding: 18px 16px 40px; }
+    }
   </style>
 </head>
-<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
+<body class="min-h-screen">
 
-  <!-- TOP APP BAR -->
-  <header class="bg-[#003366] text-white shadow-md sticky top-0 z-40">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-      <div class="flex items-center space-x-3">
-        <div class="w-10 h-10 bg-[#EB1C24] rounded-lg flex items-center justify-center font-extrabold text-white text-xl shadow">
-          M
-        </div>
-        <div>
-          <h1 class="font-bold text-lg leading-tight flex items-center space-x-2">
-            <span>MSB CreditPilot 360</span>
-            <span class="text-xs bg-[#FF5A00] text-white px-2 py-0.5 rounded font-semibold">From Documents to Credit Committee</span>
-          </h1>
-          <p class="text-xs text-slate-300">Trợ lý Phân tích, Soạn thảo & Bảo vệ Tờ trình Tín dụng KHDN Lớn (Mô hình 70% AI + 30% RM)</p>
-        </div>
-      </div>
-
-      <!-- CASE SELECTOR & DEMO QUICKSTART -->
-      <div class="flex items-center space-x-3">
-        <div class="flex items-center space-x-2 bg-slate-800/90 px-3 py-1.5 rounded-lg border border-slate-700">
-          <label class="text-xs text-amber-300 font-semibold whitespace-nowrap">📁 Hồ sơ Khách hàng:</label>
-          <select id="case-selector" onchange="onCaseChange(this.value)" class="bg-slate-900 text-white text-xs font-semibold px-2.5 py-1 rounded border border-slate-600 focus:outline-none focus:ring-1 focus:ring-amber-400">
-            <option value="PSD">PSD - CTCP Dịch vụ Phân phối TH Dầu khí</option>
-            <option value="GAS_SOUTH">GAS SOUTH - CTCP Khí Miền Nam</option>
-            <option value="PHYTOPHARMA">PHYTOPHARMA - CTCP Dược liệu TW2</option>
-          </select>
-          <button onclick="resetDemoCase()" title="Đặt lại dữ liệu demo chuẩn" class="text-xs bg-amber-600 hover:bg-amber-700 text-white font-bold px-2 py-1 rounded shadow flex items-center space-x-1 whitespace-nowrap">
-            <span>⚡ Nạp Demo Chuẩn</span>
-          </button>
-          <button onclick="openNewCaseModal()" class="text-xs bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-2 py-1 rounded shadow flex items-center space-x-1 whitespace-nowrap">
-            <span>➕ Tạo Mới</span>
-          </button>
-        </div>
-
-        <button onclick="generateDocx()" id="btn-export-top" class="bg-[#EB1C24] hover:bg-red-700 text-white font-semibold px-4 py-2 rounded-lg text-sm shadow transition flex items-center space-x-1.5 whitespace-nowrap">
-          <span>⚡ Xuất Tờ Trình MB07 (.DOCX)</span>
-        </button>
-      </div>
-    </div>
-  </header>
-
-  <!-- 6-STEP RM HAPPY PATH NAVIGATION -->
-  <div class="bg-white border-b border-slate-200 sticky top-16 z-30 shadow-sm">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex overflow-x-auto space-x-6 text-sm font-medium text-slate-600">
-      <button onclick="switchTab('tab-dashboard')" id="nav-tab-dashboard" class="py-3.5 px-3 tab-active whitespace-nowrap flex items-center space-x-1.5">
-        <span>🏢 1. Hồ Sơ Khách Hàng</span>
-      </button>
-      <button onclick="switchTab('tab-upload')" id="nav-tab-upload" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5">
-        <span>📂 2. Không Gian Tài Liệu</span>
-      </button>
-      <button onclick="switchTab('tab-review')" id="nav-tab-review" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5">
-        <span>📋 3. Dữ Liệu Đã Xác Nhận</span>
-      </button>
-      <button onclick="switchTab('tab-insights')" id="nav-tab-insights" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5 text-blue-700 font-semibold">
-        <span>💡 4. Thẩm Định Tín Dụng AI</span>
-      </button>
-      <button onclick="switchTab('tab-narrative')" id="nav-tab-narrative" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5 text-red-600 font-semibold">
-        <span>📝 5. Tờ Trình / Narrative</span>
-      </button>
-      <button onclick="switchTab('tab-committee')" id="nav-tab-committee" class="py-3.5 px-3 hover:text-slate-900 whitespace-nowrap flex items-center space-x-1.5 text-amber-700 font-bold bg-amber-50/60 rounded-t-lg">
-        <span>🎯 6. Credit Committee Prep</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- MAIN CONTENT CONTAINER -->
-  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full">
-
-    <!-- HERO PRODUCT BANNER -->
-    <div class="mb-6 p-4 rounded-xl bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white shadow-md flex items-center justify-between">
-      <div class="flex items-center space-x-3.5">
-        <div class="w-10 h-10 rounded-lg bg-white/10 flex items-center justify-center text-xl">🛡️</div>
-        <div>
-          <div class="font-bold text-sm tracking-wide text-amber-300">MSB CREDITPILOT 360 — BẢO VỆ TỜ TRÌNH TOÀN DIỆN</div>
-          <div class="text-xs text-slate-200 mt-0.5 italic">
-            "Không chỉ giúp RM viết tờ trình — CreditPilot giúp RM sẵn sàng bảo vệ tờ trình trước Hội đồng Tín dụng."
+  <div class="app-shell">
+    <!-- LEFT SIDEBAR: PRIMARY NAVIGATION (6-STEP RM WORKFLOW) -->
+    <aside class="sidebar" id="app-sidebar">
+      <div class="sidebar-brand">
+        <div class="sidebar-brand-row">
+          <div class="sidebar-mark">M</div>
+          <div>
+            <div class="sidebar-title">CreditPilot 360</div>
+            <div class="sidebar-subtitle">Thẩm định &amp; Soạn thảo Tờ trình KHDN</div>
           </div>
         </div>
       </div>
-      <div class="flex items-center space-x-2">
-        <span id="case-source-badge" class="text-xs bg-amber-500/20 text-amber-300 px-3 py-1 rounded-full font-bold border border-amber-400/30 whitespace-nowrap">
-          DEMO DATA (PRELOADED)
-        </span>
-        <span class="text-xs bg-emerald-500/20 text-emerald-300 px-3 py-1 rounded-full font-bold border border-emerald-400/30 whitespace-nowrap" id="banner-readiness">
-          ✓ Mức độ sẵn sàng: 100%
-        </span>
-      </div>
-    </div>
+
+      <nav class="sidebar-nav">
+        <button onclick="switchTab('tab-dashboard')" id="nav-tab-dashboard" class="nav-item tab-active" data-step="tab-dashboard">
+          <span class="nav-item-step is-active">●</span>
+          <span class="nav-item-label">Hồ sơ Khách hàng</span>
+        </button>
+        <button onclick="switchTab('tab-upload')" id="nav-tab-upload" class="nav-item" data-step="tab-upload">
+          <span class="nav-item-step is-pending">○</span>
+          <span class="nav-item-label">Không gian Tài liệu</span>
+        </button>
+        <button onclick="switchTab('tab-review')" id="nav-tab-review" class="nav-item" data-step="tab-review">
+          <span class="nav-item-step is-pending">○</span>
+          <span class="nav-item-label">Dữ liệu Đã Xác nhận</span>
+        </button>
+        <button onclick="switchTab('tab-insights')" id="nav-tab-insights" class="nav-item" data-step="tab-insights">
+          <span class="nav-item-step is-pending">○</span>
+          <span class="nav-item-label">Thẩm định Tín dụng AI</span>
+        </button>
+        <button onclick="switchTab('tab-narrative')" id="nav-tab-narrative" class="nav-item" data-step="tab-narrative">
+          <span class="nav-item-step is-pending">○</span>
+          <span class="nav-item-label">Tờ trình / Narrative</span>
+        </button>
+        <button onclick="switchTab('tab-committee')" id="nav-tab-committee" class="nav-item" data-step="tab-committee">
+          <span class="nav-item-step is-pending">○</span>
+          <span class="nav-item-label">Credit Committee</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">Mô hình 70% AI + 30% RM</div>
+    </aside>
+
+    <div class="app-main">
+      <!-- TOP CONTEXT BAR: case selector + contextual actions only -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <select id="case-selector" onchange="onCaseChange(this.value)" class="btn-sm" style="height:34px; border:1px solid var(--color-border-strong); border-radius:8px; padding:0 8px; font-size:13px; font-weight:600; color:var(--color-text); background:#fff;">
+            <option value="PSD">PSD — CTCP Phân phối Demo</option>
+            <option value="GAS_SOUTH">GAS SOUTH — CTCP Khí Miền Nam</option>
+            <option value="PHYTOPHARMA">PHYTOPHARMA — CTCP Dược liệu TW2</option>
+          </select>
+          <span id="case-source-badge" class="chip chip-warning">Demo data</span>
+        </div>
+        <div class="topbar-right">
+          <button onclick="resetDemoCase()" title="Đặt lại dữ liệu demo chuẩn" class="btn btn-ghost btn-sm">Nạp Demo Chuẩn</button>
+          <button onclick="openNewCaseModal()" class="btn btn-secondary btn-sm">+ Tạo hồ sơ mới</button>
+          <!-- Contextual primary CTA: label/action/visibility depend on the active
+               workflow step (see updateTopbarPrimaryCTA()). Defaults to Step 1's action
+               so the button is correct even before JS runs on first paint. -->
+          <button onclick="switchTab('tab-upload')" id="btn-export-top" class="btn btn-primary btn-sm">Tiếp tục → Không gian Tài liệu</button>
+        </div>
+      </header>
+
+      <!-- MAIN WORKSPACE -->
+      <main class="workspace">
 
     <!-- ========================================================================= -->
     <!-- TAB 1: TỔNG QUAN HỒ SƠ (CASE OVERVIEW)                                    -->
     <!-- ========================================================================= -->
-    <section id="tab-dashboard" class="space-y-6">
+    <section id="tab-dashboard" class="space-y-4">
+      <div>
+        <h1 class="page-title">Hồ sơ khách hàng</h1>
+        <p class="page-subtitle">Tổng quan thông tin doanh nghiệp và đề xuất cấp tín dụng cho hồ sơ đang thẩm định.</p>
+      </div>
+
+      <!-- ROW 1: SUMMARY METRICS (concise: main value fits 1-2 lines, rest is meta) -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <div class="text-xs text-slate-500 font-medium">Khách hàng thẩm định</div>
-          <div class="text-lg font-bold text-slate-900 mt-1" id="dash-cust-name">PSD (CIF: DEMO001)</div>
-          <div class="text-xs text-emerald-600 mt-1 font-semibold" id="dash-cust-rating">Định hạng MSB: Hạng AAA (95đ)</div>
+        <div class="kpi-card">
+          <div class="kpi-label">Khách hàng</div>
+          <div class="kpi-value text-wrap-safe" style="font-size:16px;" id="dash-cust-name">DEMO DISTRIBUTION JSC</div>
+          <div class="kpi-meta text-wrap-safe" id="dash-cust-cif">CIF: DEMO001</div>
+          <div class="kpi-meta text-wrap-safe" id="dash-cust-rating">Hạng AAA · 95đ</div>
         </div>
-        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <div class="text-xs text-slate-500 font-medium">Tổng hạn mức đề xuất</div>
-          <div class="text-lg font-bold text-[#003366] mt-1" id="dash-total-limit">700.000 triệu VND</div>
-          <div class="text-xs text-slate-500 mt-1" id="dash-loan-limit">Cho vay: 250.000 tr | Bảo lãnh: 30.000 tr</div>
+        <div class="kpi-card">
+          <div class="kpi-label">Hạn mức đề xuất</div>
+          <div class="kpi-value" id="dash-total-limit">700 tỷ VND</div>
+          <div class="kpi-meta text-wrap-safe" id="dash-loan-limit">Vay 250 tỷ · Bảo lãnh 30 tỷ</div>
         </div>
-        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <div class="text-xs text-slate-500 font-medium">Doanh thu thuần năm gần nhất</div>
-          <div class="text-lg font-bold text-slate-900 mt-1" id="dash-rev-2025">7.819.398 triệu VND</div>
-          <div class="text-xs text-emerald-600 mt-1 font-semibold" id="dash-np-2025">LNST: 134.201 tr (+49.6%)</div>
+        <div class="kpi-card">
+          <div class="kpi-label">Doanh thu gần nhất</div>
+          <div class="kpi-value" id="dash-rev-2025">7.819 tỷ VND</div>
+          <div class="kpi-meta text-wrap-safe" id="dash-np-2025">LNST 134,2 tỷ</div>
         </div>
-        <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-          <div class="text-xs text-slate-500 font-medium">Lịch sử quan hệ CIC</div>
-          <div class="text-lg font-bold text-emerald-600 mt-1" id="dash-cic-status">100% Nhóm 1</div>
-          <div class="text-xs text-slate-500 mt-1" id="dash-msb-out">Dư nợ tại MSB: 499.999 triệu VND</div>
+        <div class="kpi-card">
+          <div class="kpi-label">CIC</div>
+          <div class="kpi-value" style="color:var(--color-success);" id="dash-cic-status">Nhóm 1</div>
+          <div class="kpi-meta text-wrap-safe" id="dash-cic-meta">100% lịch sử tín dụng đạt chuẩn</div>
+          <div class="kpi-meta text-wrap-safe" id="dash-msb-out">Dư nợ tại MSB: 500 tỷ</div>
         </div>
       </div>
 
-      <!-- PROPOSAL SUMMARY CARD -->
-      <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-        <div class="flex items-center justify-between border-b pb-3">
-          <h3 class="font-bold text-base text-[#003366] flex items-center space-x-2">
-            <span>📑 Chi Tiết Đề Xuất Cấp Tín Dụng & Cơ Cấu Bảo Đảm</span>
-          </h3>
-          <span class="text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-1 rounded">Bản MB07 Tiêu Chuẩn MSB</span>
+      <!-- ROW 2: CUSTOMER / CREDIT DETAILS -->
+      <div class="panel p-5">
+        <div class="flex items-center justify-between border-b pb-3 mb-3" style="border-color:var(--color-border);">
+          <h3 class="section-title">Chi tiết đề xuất cấp tín dụng &amp; cơ cấu bảo đảm</h3>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
-          <div class="space-y-2.5">
-            <div class="flex justify-between py-1 border-b border-slate-100">
-              <span class="text-slate-500">Mã số doanh nghiệp (MST):</span>
-              <span class="font-semibold text-slate-800" id="dash-tax-code">0100000000</span>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8">
+          <div>
+            <div class="section-title" style="font-size:13px; color:var(--color-text-muted); font-weight:700; margin-bottom:2px;">Thông tin doanh nghiệp</div>
+            <div class="kv-row">
+              <span class="kv-label">MST</span>
+              <span class="kv-value" id="dash-tax-code">0100000000</span>
             </div>
-            <div class="flex justify-between py-1 border-b border-slate-100">
-              <span class="text-slate-500">Người đại diện pháp luật:</span>
-              <span class="font-semibold text-slate-800" id="dash-legal-rep">Đại diện Demo (Tổng Giám đốc)</span>
+            <div class="kv-row">
+              <span class="kv-label">Đại diện pháp luật</span>
+              <span class="kv-value" id="dash-legal-rep">Đại diện Demo (Tổng Giám đốc)</span>
             </div>
-            <div class="flex justify-between py-1 border-b border-slate-100">
-              <span class="text-slate-500">Vốn điều lệ thực góp:</span>
-              <span class="font-semibold text-slate-800" id="dash-capital">518.279 triệu VND</span>
+            <div class="kv-row">
+              <span class="kv-label">Vốn điều lệ</span>
+              <span class="kv-value" id="dash-capital">518.279 triệu VND</span>
             </div>
-            <div class="flex justify-between py-1 border-b border-slate-100">
-              <span class="text-slate-500">Địa chỉ trụ sở:</span>
-              <span class="font-semibold text-slate-800 text-right max-w-xs truncate" id="dash-address">P.207, Tòa nhà PetroVietnam, Số 1-5 Lê Duẩn, Q.1, TP.HCM</span>
+            <div class="kv-row">
+              <span class="kv-label">Địa chỉ</span>
+              <span class="kv-value" id="dash-address">P.207, Tòa nhà PetroVietnam, Số 1-5 Lê Duẩn, Q.1, TP.HCM</span>
             </div>
           </div>
 
-          <div class="space-y-2.5">
-            <div class="flex justify-between py-1 border-b border-slate-100">
-              <span class="text-slate-500">Mục đích cấp tín dụng:</span>
-              <span class="font-semibold text-slate-800 text-right max-w-xs truncate" id="dash-purpose">Bổ sung vốn lưu động kinh doanh ICT</span>
+          <div>
+            <div class="section-title" style="font-size:13px; color:var(--color-text-muted); font-weight:700; margin-bottom:2px;">Thông tin cấp tín dụng</div>
+            <div class="kv-row">
+              <span class="kv-label">Mục đích cấp tín dụng</span>
+              <span class="kv-value" id="dash-purpose">Bổ sung vốn lưu động kinh doanh ICT</span>
             </div>
-            <div class="flex justify-between py-1 border-b border-slate-100">
-              <span class="text-slate-500">Biện pháp bảo đảm:</span>
-              <span class="font-semibold text-emerald-700" id="dash-collat">Tín chấp 100% (Định hạng A+/AAA)</span>
+            <div class="kv-row">
+              <span class="kv-label">Biện pháp bảo đảm</span>
+              <span class="kv-value" style="color:var(--color-success);" id="dash-collat">Tín chấp 100% (Định hạng A+/AAA)</span>
             </div>
-            <div class="flex justify-between py-1 border-b border-slate-100">
-              <span class="text-slate-500">Cam kết dòng tiền về MSB:</span>
-              <span class="font-semibold text-blue-700" id="dash-cashflow">25% Doanh thu qua tài khoản MSB</span>
+            <div class="kv-row">
+              <span class="kv-label">Cam kết dòng tiền</span>
+              <span class="kv-value" id="dash-cashflow">25% Doanh thu qua tài khoản MSB</span>
             </div>
-            <div class="flex justify-between py-1 border-b border-slate-100">
-              <span class="text-slate-500">Thẩm quyền phê duyệt:</span>
-              <span class="font-semibold text-slate-800" id="dash-authority">Hội đồng Tín dụng Cấp cao (HĐTDCC)</span>
+            <div class="kv-row">
+              <span class="kv-label">Thẩm quyền phê duyệt</span>
+              <span class="kv-value" id="dash-authority">Hội đồng Tín dụng Cấp cao (HĐTDCC)</span>
             </div>
           </div>
         </div>
 
-        <div class="pt-2 flex justify-end space-x-3">
-          <button onclick="switchTab('tab-upload')" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-bold transition">
-            📂 Quản lý Hồ sơ & Tài liệu →
-          </button>
-          <button onclick="switchTab('tab-insights')" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition">
-            💡 Xem Thẩm định Tín dụng AI →
-          </button>
+        <div class="pt-4 mt-2 flex justify-end" style="border-top:1px solid var(--color-border);">
+          <button onclick="switchTab('tab-upload')" class="btn btn-primary">Tiếp tục → Không gian Tài liệu</button>
         </div>
       </div>
     </section>
@@ -1053,148 +1202,125 @@ HTML_PAGE = """<!DOCTYPE html>
     <!-- ========================================================================= -->
     <!-- TAB 2: KHÔNG GIAN HỒ SƠ (DOCUMENT WORKSPACE)                              -->
     <!-- ========================================================================= -->
-    <section id="tab-upload" class="hidden space-y-6">
-      <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-        <div class="flex items-center justify-between border-b pb-3">
-          <div>
-            <h3 class="font-bold text-base text-[#003366]">📂 Danh Mục Tài Liệu Hồ Sơ Khách Hàng</h3>
-            <p class="text-xs text-slate-500">Bóc tách tự động đa tài liệu qua GreenNode Document AI với bằng chứng đối soát trang (No Evidence → No Fact)</p>
-          </div>
-          <span id="doc-workspace-badge" class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded">4/4 Nhóm Tài Liệu Đã Nạp</span>
+    <section id="tab-upload" class="hidden space-y-4">
+      <div>
+        <h1 class="page-title">Không gian Tài liệu</h1>
+        <p class="page-subtitle">Tải lên, bóc tách và đối soát 4 nhóm tài liệu hồ sơ. Quy trình: Tải lên → Đối soát → Xác nhận.</p>
+      </div>
+      <div class="panel p-5 space-y-4">
+        <div class="flex items-center justify-between border-b pb-3" style="border-color:var(--color-border);">
+          <h3 class="section-title">Danh mục tài liệu</h3>
+          <span id="doc-workspace-badge" class="chip chip-success">4/4 nhóm tài liệu đã nạp</span>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <!-- CARD 1: LEGAL -->
-          <div id="card-legal" class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+          <div id="card-legal" class="p-4 rounded-lg border space-y-3" style="border-color:var(--color-border); background:var(--color-bg);">
             <input type="file" id="file-legal" accept=".pdf" class="hidden" onchange="handleFileSelected('legal', this)">
-            <div class="flex items-start justify-between">
-              <div class="flex items-center space-x-2">
-                <span class="text-xl">🏛️</span>
-                <div>
-                  <div class="text-sm font-bold text-slate-800">1. Hồ sơ Pháp lý & ĐKKD</div>
-                  <div id="file-name-legal" class="text-xs text-slate-500">Giay_Phep_DKKD_PSD.pdf (Trang 1 - 3)</div>
-                </div>
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold" style="color:var(--color-text);">1 · Hồ sơ Pháp lý &amp; ĐKKD</div>
+                <div id="file-name-legal" class="text-xs mt-0.5 text-wrap-safe" style="color:var(--color-text-muted);">Giay_Phep_DKKD_PSD.pdf (Trang 1 - 3)</div>
               </div>
-              <div id="status-badge-legal">
-                <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã bóc tách & xác nhận</span>
+              <div id="status-badge-legal" class="flex-none">
+                <span class="chip chip-success">Confirmed</span>
               </div>
             </div>
-            <div id="summary-legal" class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
-              <div>• Tên DN: <span id="sum-legal-name" class="font-semibold text-slate-800">CTCP Dịch vụ Phân phối TH Dầu khí</span></div>
-              <div>• MST: <span id="sum-legal-tax" class="font-semibold text-slate-800">0100000000</span> | Vốn ĐL: <span id="sum-legal-capital" class="font-semibold text-slate-800">518.279 tr</span></div>
-              <div>• ĐDPL: <span id="sum-legal-rep" class="font-semibold text-slate-800">Đại diện Demo</span> (Tổng Giám đốc)</div>
+            <div id="summary-legal" class="text-xs space-y-1 bg-white p-3 rounded-md border text-wrap-safe" style="border-color:var(--color-border); color:var(--color-text-muted);">
+              <div>Tên DN: <span id="sum-legal-name" class="font-semibold" style="color:var(--color-text);">CÔNG TY CỔ PHẦN PHÂN PHỐI DEMO</span></div>
+              <div>MST: <span id="sum-legal-tax" class="font-semibold" style="color:var(--color-text);">0100000000</span> · Vốn ĐL: <span id="sum-legal-capital" class="font-semibold" style="color:var(--color-text);">518.279 tr</span></div>
+              <div>ĐDPL: <span id="sum-legal-rep" class="font-semibold" style="color:var(--color-text);">Đại diện Demo (Tổng Giám đốc)</span></div>
             </div>
-            <div id="actions-legal" class="flex items-center justify-between pt-1">
-              <span id="tip-legal" class="text-[11px] text-slate-400 italic">Đã đồng bộ vào Phần A MB07</span>
-              <div class="flex space-x-2">
-                <button onclick="triggerDocUpload('legal')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
-                  🔄 Thay thế PDF
-                </button>
-                <button onclick="openReviewModal('legal')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
-                  🔍 Xem Lại Bóc Tách
-                </button>
+            <div id="actions-legal" class="flex items-center justify-between pt-1 gap-2">
+              <span id="tip-legal" class="text-[11px] text-wrap-safe" style="color:var(--color-text-faint);">Đã đồng bộ vào Phần A MB07</span>
+              <div class="flex space-x-2 flex-none">
+                <button onclick="triggerDocUpload('legal')" class="btn btn-secondary btn-sm">Thay thế</button>
+                <button onclick="openReviewModal('legal')" class="btn btn-primary btn-sm">Xem lại</button>
               </div>
             </div>
           </div>
 
           <!-- CARD 2: BUSINESS -->
-          <div id="card-business" class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+          <div id="card-business" class="p-4 rounded-lg border space-y-3" style="border-color:var(--color-border); background:var(--color-bg);">
             <input type="file" id="file-business" accept=".pdf" class="hidden" onchange="handleFileSelected('business', this)">
-            <div class="flex items-start justify-between">
-              <div class="flex items-center space-x-2">
-                <span class="text-xl">🏭</span>
-                <div>
-                  <div class="text-sm font-bold text-slate-800">2. Mô hình KD & Chuỗi cung ứng</div>
-                  <div id="file-name-business" class="text-xs text-slate-500">Bao_Cao_Thuong_Nien_PSD.pdf (Trang 15 - 42)</div>
-                </div>
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold" style="color:var(--color-text);">2 · Mô hình KD &amp; Chuỗi cung ứng</div>
+                <div id="file-name-business" class="text-xs mt-0.5 text-wrap-safe" style="color:var(--color-text-muted);">Bao_Cao_Thuong_Nien_PSD.pdf (Trang 15 - 42)</div>
               </div>
-              <div id="status-badge-business">
-                <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã bóc tách chuỗi cung ứng</span>
+              <div id="status-badge-business" class="flex-none">
+                <span class="chip chip-success">Confirmed</span>
               </div>
             </div>
-            <div id="summary-business" class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
-              <div>• Mô hình: <span id="sum-biz-model" class="font-semibold text-slate-800">Thương mại Phân phối ICT</span></div>
-              <div>• Nhà cung cấp chính: <span id="sum-biz-suppliers" class="font-semibold text-slate-800">Dell (28.1%), Lenovo (20.4%), Samsung (19.1%)</span></div>
-              <div>• Khách hàng chính: <span id="sum-biz-customers" class="font-semibold text-slate-800">MWG (4.5%), Viettel Store, FPT Shop</span></div>
+            <div id="summary-business" class="text-xs space-y-1 bg-white p-3 rounded-md border text-wrap-safe" style="border-color:var(--color-border); color:var(--color-text-muted);">
+              <div>Mô hình: <span id="sum-biz-model" class="font-semibold" style="color:var(--color-text);">Thương mại Phân phối ICT</span></div>
+              <div>Nhà cung cấp chính: <span id="sum-biz-suppliers" class="font-semibold" style="color:var(--color-text);">Dell (28.1%), Lenovo (20.4%), Samsung (19.1%)</span></div>
+              <div>Khách hàng chính: <span id="sum-biz-customers" class="font-semibold" style="color:var(--color-text);">MWG (4.5%), Viettel Store, FPT Shop</span></div>
             </div>
-            <div id="actions-business" class="flex items-center justify-between pt-1">
-              <span id="tip-business" class="text-[11px] text-slate-400 italic">Đã đồng bộ vào Phần C MB07</span>
-              <div class="flex space-x-2">
-                <button onclick="triggerDocUpload('business')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
-                  🔄 Thay thế PDF
-                </button>
-                <button onclick="openReviewModal('business')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
-                  🔍 Xem Lại Bóc Tách
-                </button>
+            <div id="actions-business" class="flex items-center justify-between pt-1 gap-2">
+              <span id="tip-business" class="text-[11px] text-wrap-safe" style="color:var(--color-text-faint);">Đã đồng bộ vào Phần C MB07</span>
+              <div class="flex space-x-2 flex-none">
+                <button onclick="triggerDocUpload('business')" class="btn btn-secondary btn-sm">Thay thế</button>
+                <button onclick="openReviewModal('business')" class="btn btn-primary btn-sm">Xem lại</button>
               </div>
             </div>
           </div>
 
           <!-- CARD 3: FINANCIAL -->
-          <div id="card-financial" class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+          <div id="card-financial" class="p-4 rounded-lg border space-y-3" style="border-color:var(--color-border); background:var(--color-bg);">
             <input type="file" id="file-financial" accept=".pdf" class="hidden" onchange="handleFileSelected('financial', this)">
-            <div class="flex items-start justify-between">
-              <div class="flex items-center space-x-2">
-                <span class="text-xl">📈</span>
-                <div>
-                  <div class="text-sm font-bold text-slate-800">3. BCTC Kiểm toán 3 năm</div>
-                  <div id="file-name-financial" class="text-xs text-slate-500">BCTC_Kiem_Toan_PwC_2025.pdf</div>
-                </div>
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold" style="color:var(--color-text);">3 · BCTC Kiểm toán 3 năm</div>
+                <div id="file-name-financial" class="text-xs mt-0.5 text-wrap-safe" style="color:var(--color-text-muted);">BCTC_Kiem_Toan_PwC_2025.pdf</div>
               </div>
-              <div id="status-badge-financial">
-                <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã đối soát 3 năm</span>
+              <div id="status-badge-financial" class="flex-none">
+                <span class="chip chip-success">Confirmed</span>
               </div>
             </div>
-            <div id="summary-financial" class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
-              <div>• Đơn vị kiểm toán: <span id="sum-fin-auditor" class="font-semibold text-slate-800">PwC Việt Nam (Chấp thuận toàn phần)</span></div>
-              <div>• Doanh thu 2025: <span id="sum-fin-rev" class="font-semibold text-slate-800">7.819.398 tr</span></div>
-              <div>• LNST 2025: <span id="sum-fin-np" class="font-semibold text-slate-800">134.201 tr</span> | VCSH: <span id="sum-fin-equity" class="font-semibold text-slate-800">729.343 tr</span></div>
+            <div id="summary-financial" class="text-xs space-y-1 bg-white p-3 rounded-md border text-wrap-safe" style="border-color:var(--color-border); color:var(--color-text-muted);">
+              <div>Đơn vị kiểm toán: <span id="sum-fin-auditor" class="font-semibold" style="color:var(--color-text);">PwC Việt Nam (Chấp thuận toàn phần)</span></div>
+              <div>Doanh thu 2025: <span id="sum-fin-rev" class="font-semibold" style="color:var(--color-text);">7.819.398 tr</span></div>
+              <div>LNST 2025: <span id="sum-fin-np" class="font-semibold" style="color:var(--color-text);">134.201 tr</span> · VCSH: <span id="sum-fin-equity" class="font-semibold" style="color:var(--color-text);">729.343 tr</span></div>
             </div>
-            <div id="actions-financial" class="flex items-center justify-between pt-1">
-              <span id="tip-financial" class="text-[11px] text-slate-400 italic">Đã đồng bộ vào Phần D MB07</span>
-              <div class="flex space-x-2">
-                <button onclick="triggerDocUpload('financial')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
-                  🔄 Thay thế PDF
-                </button>
-                <button onclick="openReviewModal('financial')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
-                  🔍 Xem Lại Bóc Tách
-                </button>
+            <div id="actions-financial" class="flex items-center justify-between pt-1 gap-2">
+              <span id="tip-financial" class="text-[11px] text-wrap-safe" style="color:var(--color-text-faint);">Đã đồng bộ vào Phần D MB07</span>
+              <div class="flex space-x-2 flex-none">
+                <button onclick="triggerDocUpload('financial')" class="btn btn-secondary btn-sm">Thay thế</button>
+                <button onclick="openReviewModal('financial')" class="btn btn-primary btn-sm">Xem lại</button>
               </div>
             </div>
           </div>
 
           <!-- CARD 4: CIC -->
-          <div id="card-cic" class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-3">
+          <div id="card-cic" class="p-4 rounded-lg border space-y-3" style="border-color:var(--color-border); background:var(--color-bg);">
             <input type="file" id="file-cic" accept=".pdf" class="hidden" onchange="handleFileSelected('cic', this)">
-            <div class="flex items-start justify-between">
-              <div class="flex items-center space-x-2">
-                <span class="text-xl">🏦</span>
-                <div>
-                  <div class="text-sm font-bold text-slate-800">4. Báo cáo Tín dụng CIC Chi tiết</div>
-                  <div id="file-name-cic" class="text-xs text-slate-500">Bao_Cao_CIC_Chi_Tiet_2025.pdf</div>
-                </div>
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="text-sm font-semibold" style="color:var(--color-text);">4 · Báo cáo Tín dụng CIC Chi tiết</div>
+                <div id="file-name-cic" class="text-xs mt-0.5 text-wrap-safe" style="color:var(--color-text-muted);">Bao_Cao_CIC_Chi_Tiet_2025.pdf</div>
               </div>
-              <div id="status-badge-cic">
-                <span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">✓ Đã đối soát chuẩn mực</span>
+              <div id="status-badge-cic" class="flex-none">
+                <span class="chip chip-success">Confirmed</span>
               </div>
             </div>
-            <div id="summary-cic" class="text-xs text-slate-600 space-y-1 bg-white p-3 rounded-lg border border-slate-200">
-              <div>• Ngày tra cứu CIC: <span id="sum-cic-date" class="font-semibold text-slate-800">31/12/2025</span></div>
-              <div>• Phân loại nợ: <span id="sum-cic-status" class="font-semibold text-emerald-700">100% Nhóm 1 (Đủ tiêu chuẩn 24 tháng)</span></div>
-              <div>• Dư nợ tại MSB: <span id="sum-cic-msb" class="font-semibold text-slate-800">499.999 tr</span> | Dư nợ TCTD khác: <span id="sum-cic-other" class="font-semibold text-slate-800">Đầy đủ</span></div>
+            <div id="summary-cic" class="text-xs space-y-1 bg-white p-3 rounded-md border text-wrap-safe" style="border-color:var(--color-border); color:var(--color-text-muted);">
+              <div>Ngày tra cứu CIC: <span id="sum-cic-date" class="font-semibold" style="color:var(--color-text);">31/12/2025</span></div>
+              <div>Phân loại nợ: <span id="sum-cic-status" class="font-semibold" style="color:var(--color-success);">100% Nhóm 1 (Đủ tiêu chuẩn 24 tháng)</span></div>
+              <div>Dư nợ tại MSB: <span id="sum-cic-msb" class="font-semibold" style="color:var(--color-text);">499.999 tr</span> · TCTD khác: <span id="sum-cic-other" class="font-semibold" style="color:var(--color-text);">Đầy đủ</span></div>
             </div>
-            <div id="actions-cic" class="flex items-center justify-between pt-1">
-              <span id="tip-cic" class="text-[11px] text-slate-400 italic">Đã đồng bộ vào Phần E MB07</span>
-              <div class="flex space-x-2">
-                <button onclick="triggerDocUpload('cic')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
-                  🔄 Thay thế PDF
-                </button>
-                <button onclick="openReviewModal('cic')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
-                  🔍 Xem Lại Bóc Tách
-                </button>
+            <div id="actions-cic" class="flex items-center justify-between pt-1 gap-2">
+              <span id="tip-cic" class="text-[11px] text-wrap-safe" style="color:var(--color-text-faint);">Đã đồng bộ vào Phần E MB07</span>
+              <div class="flex space-x-2 flex-none">
+                <button onclick="triggerDocUpload('cic')" class="btn btn-secondary btn-sm">Thay thế</button>
+                <button onclick="openReviewModal('cic')" class="btn btn-primary btn-sm">Xem lại</button>
               </div>
             </div>
           </div>
+        </div>
+
+        <div class="pt-4 flex justify-end" style="border-top:1px solid var(--color-border);">
+          <button onclick="switchTab('tab-review')" class="btn btn-primary">Tiếp tục → Xác nhận Dữ liệu</button>
         </div>
       </div>
     </section>
@@ -1202,93 +1328,99 @@ HTML_PAGE = """<!DOCTYPE html>
     <!-- ========================================================================= -->
     <!-- TAB 3: ĐỐI SOÁT DỮ LIỆU (FACT REVIEW A - E)                               -->
     <!-- ========================================================================= -->
-    <section id="tab-review" class="hidden space-y-6">
-      <!-- WARNING / NEEDS RM REVIEW BANNER -->
-      <div class="p-4 rounded-xl bg-amber-50 border border-amber-200 flex items-start space-x-3">
-        <span class="text-xl">⚠️</span>
-        <div class="text-xs space-y-1 text-amber-900">
-          <div class="font-bold text-sm">Cảnh Báo Đối Soát Dữ Liệu & Thẩm Quyền RM:</div>
-          <div>• Toàn bộ số liệu trích xuất từ tài liệu đã được gắn nhãn nguồn gốc trang. RM vui lòng xác nhận các trường cần đánh giá chuyên môn trước khi xuất bản.</div>
-          <div>• Trường hợp phát hiện sai lệch thực tế, RM có thể biên tập trực tiếp vào các ô tương ứng bên dưới.</div>
+    <section id="tab-review" class="hidden space-y-4">
+      <div>
+        <h1 class="page-title">Dữ liệu Đã Xác nhận</h1>
+        <p class="page-subtitle">Cấu trúc theo Phần A / B của Tờ trình MB07. Số liệu trích xuất đã gắn nguồn trang — RM xác nhận hoặc chỉnh sửa trực tiếp bên dưới.</p>
+      </div>
+
+      <div class="p-4 rounded-lg flex items-start gap-3" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
+        <div class="text-xs space-y-1" style="color:var(--color-warning);">
+          <div class="font-bold text-sm">Lưu ý đối soát &amp; thẩm quyền RM</div>
+          <div>Toàn bộ số liệu trích xuất đã được gắn nhãn nguồn gốc trang. Vui lòng xác nhận các trường cần đánh giá chuyên môn trước khi xuất bản; nếu phát hiện sai lệch, chỉnh sửa trực tiếp vào ô tương ứng.</div>
         </div>
       </div>
 
-      <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
-        <div class="flex items-center justify-between border-b pb-3">
-          <h3 class="font-bold text-base text-[#003366]">📋 Dữ Liệu Thẩm Định Theo Cấu Trúc Tờ Trình MB07</h3>
-          <div class="flex space-x-2 text-xs">
-            <button onclick="saveSectionA()" class="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded font-semibold">Lưu Phần A</button>
-            <button onclick="saveSectionB()" class="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded font-semibold">Lưu Phần B</button>
+      <div class="panel p-5 space-y-4">
+        <div class="flex items-center justify-between border-b pb-3" style="border-color:var(--color-border);">
+          <h3 class="section-title">Dữ liệu thẩm định theo cấu trúc Tờ trình MB07</h3>
+          <div class="flex space-x-2">
+            <button onclick="saveSectionA()" class="btn btn-secondary btn-sm">Lưu Phần A</button>
+            <button onclick="saveSectionB()" class="btn btn-secondary btn-sm">Lưu Phần B</button>
           </div>
         </div>
 
         <!-- SECTION A & B FORM COMPACT -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs">
           <!-- PHẦN A -->
-          <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <div class="font-bold text-slate-800 text-sm flex items-center justify-between">
-              <span>🏛️ Phần A: Thông Tin Pháp Lý & ĐVKD</span>
-              <span class="tag-ai px-2 py-0.5 rounded text-[10px] font-bold">AI Đã Điền</span>
+          <div class="space-y-3 p-4 rounded-lg border" style="background:var(--color-bg); border-color:var(--color-border);">
+            <div class="text-sm flex items-center justify-between" style="color:var(--color-text); font-weight:700;">
+              <span>Phần A · Thông tin Pháp lý &amp; ĐVKD</span>
+              <span class="chip chip-info">AI đã điền</span>
             </div>
             <div class="space-y-2">
               <div>
-                <label class="font-medium text-slate-600">Đơn vị kinh doanh thẩm định:</label>
-                <input type="text" id="rm-unit-name" value="LC2MN" class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded font-medium text-slate-800">
+                <label class="font-medium" style="color:var(--color-text-muted);">Đơn vị kinh doanh thẩm định</label>
+                <input type="text" id="rm-unit-name" value="LC2MN" class="w-full mt-1 px-3 py-1.5 bg-white border rounded font-medium" style="border-color:var(--color-border-strong); color:var(--color-text);">
               </div>
               <div class="grid grid-cols-2 gap-2">
                 <div>
-                  <label class="font-medium text-slate-600">Cán bộ bán hàng / RM:</label>
-                  <input type="text" id="rm-rm-name" value="RM DEMO / RM SUPPORT" class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded text-slate-800">
+                  <label class="font-medium" style="color:var(--color-text-muted);">Cán bộ bán hàng / RM</label>
+                  <input type="text" id="rm-rm-name" value="RM DEMO / RM SUPPORT" class="w-full mt-1 px-3 py-1.5 bg-white border rounded" style="border-color:var(--color-border-strong); color:var(--color-text);">
                 </div>
                 <div>
-                  <label class="font-medium text-slate-600">Số điện thoại RM:</label>
-                  <input type="text" id="rm-rm-phone" value="0900000000" class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded text-slate-800">
+                  <label class="font-medium" style="color:var(--color-text-muted);">Số điện thoại RM</label>
+                  <input type="text" id="rm-rm-phone" value="0900000000" class="w-full mt-1 px-3 py-1.5 bg-white border rounded" style="border-color:var(--color-border-strong); color:var(--color-text);">
                 </div>
               </div>
               <div class="grid grid-cols-2 gap-2">
                 <div>
-                  <label class="font-medium text-slate-600">Cán bộ quản lý:</label>
-                  <input type="text" id="rm-manager-name" value="MANAGER DEMO" class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded text-slate-800">
+                  <label class="font-medium" style="color:var(--color-text-muted);">Cán bộ quản lý</label>
+                  <input type="text" id="rm-manager-name" value="MANAGER DEMO" class="w-full mt-1 px-3 py-1.5 bg-white border rounded" style="border-color:var(--color-border-strong); color:var(--color-text);">
                 </div>
                 <div>
-                  <label class="font-medium text-slate-600">Thẩm quyền phê duyệt:</label>
-                  <input type="text" id="rm-authority" value="HĐTDCC" class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded text-slate-800 font-bold text-red-700">
+                  <label class="font-medium" style="color:var(--color-text-muted);">Thẩm quyền phê duyệt</label>
+                  <input type="text" id="rm-authority" value="HĐTDCC" class="w-full mt-1 px-3 py-1.5 bg-white border rounded font-bold" style="border-color:var(--color-border-strong); color:var(--color-primary);">
                 </div>
               </div>
             </div>
           </div>
 
           <!-- PHẦN B -->
-          <div class="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <div class="font-bold text-slate-800 text-sm flex items-center justify-between">
-              <span>💰 Phần B: Đề Xuất Cấp Tín Dụng</span>
-              <span class="tag-rm px-2 py-0.5 rounded text-[10px] font-bold">RM Thẩm Định</span>
+          <div class="space-y-3 p-4 rounded-lg border" style="background:var(--color-bg); border-color:var(--color-border);">
+            <div class="text-sm flex items-center justify-between" style="color:var(--color-text); font-weight:700;">
+              <span>Phần B · Đề xuất Cấp Tín dụng</span>
+              <span class="chip chip-warning">RM thẩm định</span>
             </div>
             <div class="space-y-2">
               <div class="grid grid-cols-3 gap-2">
                 <div>
-                  <label class="font-medium text-slate-600">Tổng hạn mức (tr):</label>
-                  <input type="number" id="rm-total-limit" value="700000" class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded font-bold text-[#003366]">
+                  <label class="font-medium" style="color:var(--color-text-muted);">Tổng hạn mức (tr)</label>
+                  <input type="number" id="rm-total-limit" value="700000" class="w-full mt-1 px-3 py-1.5 bg-white border rounded font-bold" style="border-color:var(--color-border-strong); color:var(--color-primary);">
                 </div>
                 <div>
-                  <label class="font-medium text-slate-600">Hạn mức vay (tr):</label>
-                  <input type="number" id="rm-loan-limit" value="250000" class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded text-slate-800">
+                  <label class="font-medium" style="color:var(--color-text-muted);">Hạn mức vay (tr)</label>
+                  <input type="number" id="rm-loan-limit" value="250000" class="w-full mt-1 px-3 py-1.5 bg-white border rounded" style="border-color:var(--color-border-strong); color:var(--color-text);">
                 </div>
                 <div>
-                  <label class="font-medium text-slate-600">Bảo lãnh (tr):</label>
-                  <input type="number" id="rm-guar-limit" value="30000" class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded text-slate-800">
+                  <label class="font-medium" style="color:var(--color-text-muted);">Bảo lãnh (tr)</label>
+                  <input type="number" id="rm-guar-limit" value="30000" class="w-full mt-1 px-3 py-1.5 bg-white border rounded" style="border-color:var(--color-border-strong); color:var(--color-text);">
                 </div>
               </div>
               <div>
-                <label class="font-medium text-slate-600">Biện pháp bảo đảm:</label>
-                <input type="text" id="rm-collateral" value="Tín chấp 100% (Cấp tín dụng không có TSBĐ theo phê duyệt định hạng A+)" class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded text-slate-800 font-medium">
+                <label class="font-medium" style="color:var(--color-text-muted);">Biện pháp bảo đảm</label>
+                <input type="text" id="rm-collateral" value="Tín chấp 100% (Cấp tín dụng không có TSBĐ theo phê duyệt định hạng A+)" class="w-full mt-1 px-3 py-1.5 bg-white border rounded font-medium" style="border-color:var(--color-border-strong); color:var(--color-text);">
               </div>
               <div>
-                <label class="font-medium text-slate-600">Mục đích vay:</label>
-                <input type="text" id="rm-purpose" value="Bổ sung vốn lưu động phục vụ hoạt động kinh doanh; thanh toán nhà cung cấp." class="w-full mt-1 px-3 py-1.5 bg-white border border-slate-300 rounded text-slate-800">
+                <label class="font-medium" style="color:var(--color-text-muted);">Mục đích vay</label>
+                <input type="text" id="rm-purpose" value="Bổ sung vốn lưu động phục vụ hoạt động kinh doanh; thanh toán nhà cung cấp." class="w-full mt-1 px-3 py-1.5 bg-white border rounded" style="border-color:var(--color-border-strong); color:var(--color-text);">
               </div>
             </div>
           </div>
+        </div>
+
+        <div class="pt-4 flex justify-end" style="border-top:1px solid var(--color-border);">
+          <button onclick="switchTab('tab-insights')" class="btn btn-primary">Tiếp tục → Thẩm định AI</button>
         </div>
       </div>
     </section>
@@ -1296,155 +1428,154 @@ HTML_PAGE = """<!DOCTYPE html>
     <!-- ========================================================================= -->
     <!-- TAB 4: THẨM ĐỊNH TÍN DỤNG AI (AI INSIGHTS EXPERIENCE - VISUAL HIGHLIGHT)  -->
     <!-- ========================================================================= -->
-    <section id="tab-insights" class="hidden space-y-6">
-      <!-- HEADER EXPLANATION -->
-      <div class="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 p-5 rounded-xl border border-blue-200 flex items-center justify-between">
-        <div>
-          <h3 class="font-bold text-base text-[#003366] flex items-center space-x-2">
-            <span>💡 Bộ Lọc Thẩm Định 2 Lớp: AI Phát Hiện Xu Hướng + Python Tái Thẩm Định Toán Học 100%</span>
-          </h3>
-          <p class="text-xs text-slate-600 mt-1">
-            Mọi chỉ số tăng trưởng, biên lợi nhuận, độ lệch vốn lưu động do GreenNode GLM-5.2 phát hiện đều được kiểm chứng và tính toán lại độc lập bằng code Python xác thực trước khi đưa vào tờ trình.
-          </p>
-        </div>
-        <span class="text-xs bg-indigo-100 text-indigo-800 font-bold px-3 py-1.5 rounded-full border border-indigo-300 whitespace-nowrap">
-          ✓ 6/6 Chỉ Số Đã Thẩm Định
-        </span>
+    <section id="tab-insights" class="hidden space-y-4">
+      <div>
+        <h1 class="page-title">Thẩm định Tín dụng AI</h1>
+        <p class="page-subtitle">AI phát hiện xu hướng; mọi chỉ số được Python tái thẩm định độc lập trước khi đưa vào tờ trình.</p>
+      </div>
+      <div class="panel p-4 flex items-center justify-between gap-3">
+        <div class="text-xs" style="color:var(--color-text-muted);">Chỉ số tài chính then chốt — nguồn: BCTC đã xác nhận + đối soát CIC.</div>
+        <span class="chip chip-info">6/6 chỉ số đã thẩm định</span>
       </div>
 
       <!-- INSIGHTS GRID -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-5" id="insights-container">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4" id="insights-container">
         <!-- CARD 1: REVENUE GROWTH -->
-        <div class="card-insight bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded">TĂNG TRƯỞNG DOANH THU</span>
-            <span class="tag-verified text-[11px] font-bold px-2 py-0.5 rounded">✓ Python Verified</span>
+        <div class="card-insight panel p-4 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-wrap-safe" style="color:var(--color-text-muted);">Tăng trưởng doanh thu</span>
+            <span class="chip chip-success">Calculated</span>
           </div>
-          <div class="flex items-baseline space-x-2">
-            <span class="text-3xl font-extrabold text-emerald-600">+37.1%</span>
-            <span class="text-xs text-slate-500">(2024 -> 2025)</span>
+          <div class="flex items-baseline gap-2">
+            <span class="kpi-value" style="color:var(--color-success); font-size:26px;">+37.1%</span>
+            <span class="text-xs" style="color:var(--color-text-faint);">2024 → 2025</span>
           </div>
-          <div class="text-xs text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1.5">
-            <div class="font-semibold text-slate-800">🤖 AI Phát hiện:</div>
-            <p class="text-slate-600">Doanh thu bứt phá từ 5.702,5 tỷ lên 7.819,4 tỷ VND nhờ mở rộng phân phối các dòng điện thoại thông minh thế hệ mới.</p>
-            <div class="pt-1 border-t border-slate-200 text-[11px] text-indigo-700 font-mono">
-              Công thức: (7.819,4 - 5.702,5) / 5.702,5 = +37.12%
+          <div class="text-xs p-3 rounded-md border space-y-1.5" style="background:var(--color-bg); border-color:var(--color-border); color:var(--color-text-muted);">
+            <div class="font-semibold" style="color:var(--color-text);">AI Insight</div>
+            <p class="clamp-3">Doanh thu bứt phá từ 5.702,5 tỷ lên 7.819,4 tỷ VND nhờ mở rộng phân phối các dòng điện thoại thông minh thế hệ mới.</p>
+            <div class="pt-1.5 border-t text-[11px] font-mono text-wrap-safe" style="border-color:var(--color-border); color:var(--color-accent-dark);">
+              (7.819,4 − 5.702,5) / 5.702,5 = +37.12%
             </div>
           </div>
         </div>
 
         <!-- CARD 2: GROSS PROFIT MARGIN -->
-        <div class="card-insight bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded">BIÊN LỢI NHUẬN GỘP</span>
-            <span class="tag-verified text-[11px] font-bold px-2 py-0.5 rounded">✓ Python Verified</span>
+        <div class="card-insight panel p-4 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-wrap-safe" style="color:var(--color-text-muted);">Biên lợi nhuận gộp</span>
+            <span class="chip chip-success">Calculated</span>
           </div>
-          <div class="flex items-baseline space-x-2">
-            <span class="text-3xl font-extrabold text-slate-800">5.20%</span>
-            <span class="text-xs text-emerald-600 font-semibold">(LN gộp: 406.8 tỷ)</span>
+          <div class="flex items-baseline gap-2">
+            <span class="kpi-value" style="font-size:26px;">5.20%</span>
+            <span class="text-xs" style="color:var(--color-text-faint);">LN gộp: 406.8 tỷ</span>
           </div>
-          <div class="text-xs text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1.5">
-            <div class="font-semibold text-slate-800">🤖 AI Phát hiện:</div>
-            <p class="text-slate-600">Biên lợi nhuận gộp duy trì ổn định >5.2%, lợi nhuận gộp tăng trưởng +26.8% so với năm 2024 (320.9 tỷ VND).</p>
-            <div class="pt-1 border-t border-slate-200 text-[11px] text-indigo-700 font-mono">
-              Công thức: 406.809 / 7.819.398 = 5.20%
+          <div class="text-xs p-3 rounded-md border space-y-1.5" style="background:var(--color-bg); border-color:var(--color-border); color:var(--color-text-muted);">
+            <div class="font-semibold" style="color:var(--color-text);">AI Insight</div>
+            <p class="clamp-3">Biên lợi nhuận gộp duy trì ổn định &gt;5.2%, lợi nhuận gộp tăng trưởng +26.8% so với năm 2024 (320.9 tỷ VND).</p>
+            <div class="pt-1.5 border-t text-[11px] font-mono text-wrap-safe" style="border-color:var(--color-border); color:var(--color-accent-dark);">
+              406.809 / 7.819.398 = 5.20%
             </div>
           </div>
         </div>
 
         <!-- CARD 3: RECEIVABLES DIVERGENCE -->
-        <div class="card-insight bg-white p-5 rounded-xl border border-amber-200 shadow-sm space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded">ĐỘ LỆCH PHẢI THU</span>
-            <span class="tag-warning text-[11px] font-bold px-2 py-0.5 rounded">⚠️ Cần RM Lưu Ý</span>
+        <div class="card-insight panel p-4 space-y-2.5" style="border-color:var(--color-warning-border);">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-wrap-safe" style="color:var(--color-text-muted);">Độ lệch phải thu</span>
+            <span class="chip chip-warning">Data Gap</span>
           </div>
-          <div class="flex items-baseline space-x-2">
-            <span class="text-3xl font-extrabold text-amber-600">+104.0%</span>
-            <span class="text-xs text-slate-500">(vs DThu +37.1%)</span>
+          <div class="flex items-baseline gap-2">
+            <span class="kpi-value" style="color:var(--color-warning); font-size:26px;">+104.0%</span>
+            <span class="text-xs" style="color:var(--color-text-faint);">vs DThu +37.1%</span>
           </div>
-          <div class="text-xs text-slate-700 bg-amber-50/50 p-3 rounded-lg border border-amber-200 space-y-1.5">
-            <div class="font-semibold text-amber-900">🤖 AI Cảnh báo:</div>
-            <p class="text-slate-700">Phải thu ngắn hạn tăng nhanh từ 723 tỷ lên 1.475 tỷ VND, cần đối soát chất lượng công nợ chuỗi đại lý đầu ra.</p>
-            <div class="pt-1 border-t border-amber-200 text-[11px] text-amber-800 font-mono">
-              Công thức: (1.475,0 - 723,0) / 723,0 = +104.01%
+          <div class="text-xs p-3 rounded-md border space-y-1.5" style="background:var(--color-warning-bg); border-color:var(--color-warning-border); color:var(--color-text-muted);">
+            <div class="font-semibold" style="color:var(--color-warning);">AI Insight — cần RM lưu ý</div>
+            <p class="clamp-3">Phải thu ngắn hạn tăng nhanh từ 723 tỷ lên 1.475 tỷ VND, cần đối soát chất lượng công nợ chuỗi đại lý đầu ra.</p>
+            <div class="pt-1.5 border-t text-[11px] font-mono text-wrap-safe" style="border-color:var(--color-warning-border); color:var(--color-warning);">
+              (1.475,0 − 723,0) / 723,0 = +104.01%
             </div>
           </div>
         </div>
 
         <!-- CARD 4: ASSET STRUCTURE -->
-        <div class="card-insight bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-purple-700 bg-purple-50 px-2.5 py-1 rounded">CƠ CẤU TÀI SẢN</span>
-            <span class="tag-verified text-[11px] font-bold px-2 py-0.5 rounded">✓ Python Verified</span>
+        <div class="card-insight panel p-4 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-wrap-safe" style="color:var(--color-text-muted);">Cơ cấu tài sản</span>
+            <span class="chip chip-success">Calculated</span>
           </div>
-          <div class="flex items-baseline space-x-2">
-            <span class="text-3xl font-extrabold text-slate-800">98.2%</span>
-            <span class="text-xs text-slate-500">(Tài sản ngắn hạn)</span>
+          <div class="flex items-baseline gap-2">
+            <span class="kpi-value" style="font-size:26px;">98.2%</span>
+            <span class="text-xs" style="color:var(--color-text-faint);">Tài sản ngắn hạn</span>
           </div>
-          <div class="text-xs text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1.5">
-            <div class="font-semibold text-slate-800">🤖 AI Phát hiện:</div>
-            <p class="text-slate-600">Tài sản ngắn hạn chiếm 4.600 tỷ / 4.683 tỷ VND tổng tài sản, phù hợp đặc thù luân chuyển nhanh của ngành phân phối.</p>
-            <div class="pt-1 border-t border-slate-200 text-[11px] text-indigo-700 font-mono">
-              Công thức: 4.600.702 / 4.683.423 = 98.23%
+          <div class="text-xs p-3 rounded-md border space-y-1.5" style="background:var(--color-bg); border-color:var(--color-border); color:var(--color-text-muted);">
+            <div class="font-semibold" style="color:var(--color-text);">AI Insight</div>
+            <p class="clamp-3">Tài sản ngắn hạn chiếm 4.600 tỷ / 4.683 tỷ VND tổng tài sản, phù hợp đặc thù luân chuyển nhanh của ngành phân phối.</p>
+            <div class="pt-1.5 border-t text-[11px] font-mono text-wrap-safe" style="border-color:var(--color-border); color:var(--color-accent-dark);">
+              4.600.702 / 4.683.423 = 98.23%
             </div>
           </div>
         </div>
 
         <!-- CARD 5: SUPPLIER CONCENTRATION -->
-        <div class="card-insight bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded">TẬP TRUNG NHÀ CUNG CẤP</span>
-            <span class="tag-verified text-[11px] font-bold px-2 py-0.5 rounded">✓ Python Verified</span>
+        <div class="card-insight panel p-4 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-wrap-safe" style="color:var(--color-text-muted);">Tập trung nhà cung cấp</span>
+            <span class="chip chip-info">AI Insight</span>
           </div>
-          <div class="flex items-baseline space-x-2">
-            <span class="text-3xl font-extrabold text-slate-800">Top 1: 28.1%</span>
-            <span class="text-xs text-slate-500">(Dell Global)</span>
+          <div class="flex items-baseline gap-2">
+            <span class="kpi-value" style="font-size:22px;">Top 1: 28.1%</span>
+            <span class="text-xs" style="color:var(--color-text-faint);">Dell Global</span>
           </div>
-          <div class="text-xs text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1.5">
-            <div class="font-semibold text-slate-800">🤖 AI Phát hiện:</div>
-            <p class="text-slate-600">Quan hệ đối tác cấp 1 >15 năm với Dell (28.1%), Lenovo (20.4%), Samsung (19.1%) kèm cơ chế bảo vệ giá Price Protection.</p>
-            <div class="pt-1 border-t border-slate-200 text-[11px] text-indigo-700 font-mono">
+          <div class="text-xs p-3 rounded-md border space-y-1.5" style="background:var(--color-bg); border-color:var(--color-border); color:var(--color-text-muted);">
+            <div class="font-semibold" style="color:var(--color-text);">AI Insight</div>
+            <p class="clamp-3">Quan hệ đối tác cấp 1 &gt;15 năm với Dell (28.1%), Lenovo (20.4%), Samsung (19.1%) kèm cơ chế bảo vệ giá Price Protection.</p>
+            <div class="pt-1.5 border-t text-[11px] font-mono text-wrap-safe" style="border-color:var(--color-border); color:var(--color-accent-dark);">
               Đối soát: Hợp đồng đại lý ủy quyền cấp 1
             </div>
           </div>
         </div>
 
         <!-- CARD 6: CIC DISCIPLINE -->
-        <div class="card-insight bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded">KỶ LUẬT TÍN DỤNG CIC</span>
-            <span class="tag-verified text-[11px] font-bold px-2 py-0.5 rounded">✓ Python Verified</span>
+        <div class="card-insight panel p-4 space-y-2.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-semibold text-wrap-safe" style="color:var(--color-text-muted);">Kỷ luật tín dụng CIC</span>
+            <span class="chip chip-success">Calculated</span>
           </div>
-          <div class="flex items-baseline space-x-2">
-            <span class="text-3xl font-extrabold text-emerald-600">100% Nhóm 1</span>
-            <span class="text-xs text-slate-500">(24 tháng liên tục)</span>
+          <div class="flex items-baseline gap-2">
+            <span class="kpi-value" style="color:var(--color-success); font-size:22px;">100% Nhóm 1</span>
+            <span class="text-xs" style="color:var(--color-text-faint);">24 tháng liên tục</span>
           </div>
-          <div class="text-xs text-slate-700 bg-slate-50 p-3 rounded-lg border border-slate-100 space-y-1.5">
-            <div class="font-semibold text-slate-800">🤖 AI Phát hiện:</div>
-            <p class="text-slate-600">Khách hàng và ban lãnh đạo có lịch sử trả nợ mẫu mực, 0 ngày quá hạn tại MSB và toàn bộ các TCTD.</p>
-            <div class="pt-1 border-t border-slate-200 text-[11px] text-indigo-700 font-mono">
+          <div class="text-xs p-3 rounded-md border space-y-1.5" style="background:var(--color-bg); border-color:var(--color-border); color:var(--color-text-muted);">
+            <div class="font-semibold" style="color:var(--color-text);">AI Insight</div>
+            <p class="clamp-3">Khách hàng và ban lãnh đạo có lịch sử trả nợ mẫu mực, 0 ngày quá hạn tại MSB và toàn bộ các TCTD.</p>
+            <div class="pt-1.5 border-t text-[11px] font-mono text-wrap-safe" style="border-color:var(--color-border); color:var(--color-accent-dark);">
               Đối soát: Báo cáo CIC Trung tâm đến 31/12/2025
             </div>
           </div>
         </div>
+      </div>
+
+      <div class="panel p-5 flex justify-end">
+        <button onclick="switchTab('tab-narrative')" class="btn btn-primary">Tiếp tục → Tạo Narrative</button>
       </div>
     </section>
 
     <!-- ========================================================================= -->
     <!-- TAB 5: SOẠN THẢO & XUẤT TỜ TRÌNH MB07                                     -->
     <!-- ========================================================================= -->
-    <section id="tab-narrative" class="hidden space-y-6">
-      <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
+    <section id="tab-narrative" class="hidden space-y-4">
+      <div>
+        <h1 class="page-title">Tờ trình / Narrative</h1>
+        <p class="page-subtitle">AI phát hiện → Python đối soát độc lập → RM phê duyệt (FactManifest SHA-256).</p>
+      </div>
+      <div class="panel p-5 space-y-4">
         <!-- HEADER & WORKFLOW STATUS -->
-        <div class="flex flex-col md:flex-row md:items-center justify-between border-b pb-4 gap-4">
+        <div class="flex flex-col md:flex-row md:items-center justify-between border-b pb-4 gap-4" style="border-color:var(--color-border);">
           <div>
             <div class="flex items-center space-x-3">
-              <h3 class="font-bold text-base text-[#003366]">📝 Phê Duyệt & Biên Tập Narrative Tờ Trình MB07</h3>
-              <span id="narrative-status-badge" class="text-xs font-bold px-2.5 py-0.5 rounded border border-slate-300 bg-slate-100 text-slate-600">
-                Chờ Kiểm Tra
-              </span>
+              <h3 class="section-title">Phê duyệt &amp; biên tập narrative</h3>
+              <span id="narrative-status-badge" class="chip chip-neutral">Chờ kiểm tra</span>
             </div>
-            <p class="text-xs text-slate-500 mt-1">Quy trình 3 lớp: AI Phát hiện ➔ Python Đối soát độc lập ➔ RM Phê duyệt (FactManifest SHA-256)</p>
           </div>
           <div id="narrative-header-actions" class="flex items-center space-x-2">
             <!-- Dynamic Action Buttons (Tạo Nhận Định AI / Phê Duyệt / Tạo Lại) -->
@@ -1455,15 +1586,15 @@ HTML_PAGE = """<!DOCTYPE html>
         <div id="narrative-alert-container"></div>
 
         <!-- TELEMETRY / AUDIT STRIP (shown when draft exists) -->
-        <div id="narrative-telemetry-strip" class="hidden p-3 bg-slate-50 border border-slate-200 rounded-lg text-[11px] text-slate-600 flex flex-wrap items-center justify-between gap-2">
+        <div id="narrative-telemetry-strip" class="hidden p-3 rounded-lg text-[11px] flex flex-wrap items-center justify-between gap-2" style="background:var(--color-bg); border:1px solid var(--color-border); color:var(--color-text-muted);">
           <div class="flex items-center space-x-2">
-            <span class="font-bold text-slate-700">Mô hình AI:</span>
-            <span id="narrative-model-label" class="bg-purple-100 text-purple-800 font-mono px-2 py-0.5 rounded font-bold"></span>
+            <span class="font-bold" style="color:var(--color-text);">Mô hình AI:</span>
+            <span id="narrative-model-label" class="chip chip-info font-mono"></span>
           </div>
           <div class="flex items-center space-x-3">
-            <span id="narrative-manifest-hash" class="font-mono text-slate-500">Hash: -</span>
-            <span id="narrative-insights-count" class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded font-semibold">0 Insights</span>
-            <span id="narrative-blocks-count" class="bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-semibold">0 Blocks</span>
+            <span id="narrative-manifest-hash" class="font-mono">Hash: -</span>
+            <span id="narrative-insights-count" class="chip chip-neutral">0 Insights</span>
+            <span id="narrative-blocks-count" class="chip chip-neutral">0 Blocks</span>
           </div>
         </div>
 
@@ -1472,45 +1603,34 @@ HTML_PAGE = """<!DOCTYPE html>
           <!-- Dynamically populated by renderNarrativeUI() -->
         </div>
 
-        <!-- HERO GENERATE BUTTON & DOWNLOAD STATUS -->
-        <div class="pt-4 border-t border-slate-200 flex flex-col items-center space-y-4">
-          <button onclick="generateDocx()" id="btn-generate-main" class="w-full md:w-2/3 py-4 bg-[#EB1C24] hover:bg-red-700 text-white rounded-xl font-bold text-base shadow-lg transition flex items-center justify-center space-x-2">
-            <span>🚀 BẮT ĐẦU TỔNG HỢP & XUẤT BẢN TỜ TRÌNH MB07 (.DOCX)</span>
+        <!-- EXPORT ACTION & DOWNLOAD STATUS -->
+        <div class="pt-4 flex flex-col items-center space-y-4" style="border-top:1px solid var(--color-border);">
+          <button onclick="generateDocx()" id="btn-generate-main" class="btn btn-secondary btn-lg w-full md:w-2/3" disabled>
+            Xuất Tờ Trình MB07 (.DOCX)
           </button>
-          
-          <div id="export-result" class="hidden w-full md:w-2/3 p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-center space-y-2">
-            <div class="text-emerald-800 font-bold text-sm">🎉 Tờ trình tín dụng MB07 đã được khởi tạo thành công!</div>
-            <div class="text-xs text-slate-600 font-mono" id="export-filename">Tệp tin: TO_TRINH_MB07_PSD_HOAN_CHINH.docx</div>
-            <a id="export-download-link" href="#" class="inline-block px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow transition">
-              ⬇️ TẢI FILE WORD (.DOCX) VỀ MÁY
-            </a>
+
+          <div id="export-result" class="hidden w-full md:w-2/3 p-4 rounded-lg text-center space-y-2" style="background:var(--color-success-bg); border:1px solid var(--color-success-border);">
+            <div class="font-bold text-sm" style="color:var(--color-success);">Tờ trình tín dụng MB07 đã được khởi tạo thành công</div>
+            <div class="text-xs font-mono" id="export-filename" style="color:var(--color-text-muted);">Tệp tin: TO_TRINH_MB07_PSD_HOAN_CHINH.docx</div>
+            <a id="export-download-link" href="#" class="btn btn-success btn-sm" style="display:inline-flex;">Tải file Word (.docx)</a>
           </div>
+
+          <!-- DOCUMENT QA RESULT PANEL (populated by renderDocumentQAPanel()) -->
+          <div id="qa-result-panel" class="hidden w-full md:w-2/3"></div>
         </div>
       </div>
     </section>
 
     <!-- ========================================================================= -->
-    <!-- TAB 6: SẴN SÀNG HỘI ĐỒNG TÍN DỤNG (HERO FEATURE)                          -->
+    <!-- TAB 6: SẴN SÀNG HỘI ĐỒNG TÍN DỤNG                                         -->
     <!-- ========================================================================= -->
-    <section id="tab-committee" class="hidden space-y-6">
-      <!-- HERO HEADER -->
-      <div class="badge-hero p-6 rounded-2xl text-white shadow-lg space-y-3">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center space-x-3">
-            <span class="text-3xl">🎯</span>
-            <div>
-              <h2 class="text-xl font-extrabold tracking-tight">CHUẨN BỊ BẢO VỆ TRƯỚC HỘI ĐỒNG TÍN DỤNG</h2>
-              <p class="text-xs text-blue-200">Hệ thống phân tích các điểm nhạy cảm, rủi ro tiềm ẩn và mô phỏng câu hỏi chất vấn từ HĐTD</p>
-            </div>
-          </div>
-          <span class="text-xs bg-amber-400 text-slate-900 font-extrabold px-3 py-1.5 rounded-full uppercase tracking-wider shadow">
-            Hero Feature
-          </span>
-        </div>
-        <div class="p-3 bg-white/10 rounded-xl border border-white/10 text-xs text-slate-100 flex items-center space-x-2">
-          <span>💡</span>
-          <span><strong>Mục đích:</strong> Giúp RM nắm chắc toàn bộ dữ liệu phản biện, hiểu rõ các điểm yếu trong hồ sơ và chuẩn bị sẵn phương án giải trình tự tin trước Hội đồng.</span>
-        </div>
+    <section id="tab-committee" class="hidden space-y-4">
+      <div>
+        <h1 class="page-title">Credit Committee</h1>
+        <p class="page-subtitle">Câu hỏi chất vấn dự kiến và dữ liệu giải trình để RM chuẩn bị trước Hội đồng Tín dụng.</p>
+      </div>
+      <div class="panel p-5">
+        <p class="text-xs" style="color:var(--color-text-muted);">Hệ thống phân tích các điểm nhạy cảm, rủi ro tiềm ẩn và mô phỏng câu hỏi chất vấn từ Hội đồng Tín dụng, giúp RM chuẩn bị phương án giải trình tự tin.</p>
       </div>
 
       <!-- QUESTIONS CONTAINER -->
@@ -1519,75 +1639,75 @@ HTML_PAGE = """<!DOCTYPE html>
       </div>
     </section>
 
-  </main>
+      </main>
+    </div>
+  </div>
 
   <!-- MODAL: EDIT NARRATIVE -->
-  <div id="modal-edit-narrative" class="hidden fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl space-y-4">
-      <div class="flex justify-between items-center border-b pb-3">
+  <div id="modal-edit-narrative" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(15,23,42,0.55);">
+    <div class="rounded-xl max-w-2xl w-full p-6 space-y-4" style="background:var(--color-surface); box-shadow:var(--shadow-md);">
+      <div class="flex justify-between items-center border-b pb-3" style="border-color:var(--color-border);">
         <div>
-          <h3 class="font-bold text-base text-[#003366]">✏️ Chỉnh Sửa & Tái Thẩm Định Bản Thảo Narrative</h3>
-          <p id="modal-narr-target-title" class="text-xs text-slate-500"></p>
+          <h3 class="section-title">Chỉnh sửa &amp; tái thẩm định bản thảo</h3>
+          <p id="modal-narr-target-title" class="text-xs" style="color:var(--color-text-muted);"></p>
         </div>
-        <button onclick="closeEditModal()" class="text-slate-400 hover:text-slate-600 font-bold text-lg">&times;</button>
+        <button onclick="closeEditModal()" class="btn-ghost btn btn-sm" style="font-size:16px;">&times;</button>
       </div>
-      <div id="modal-narr-error" class="hidden p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg"></div>
+      <div id="modal-narr-error" class="hidden p-3 text-xs rounded-lg" style="background:var(--color-danger-bg); border:1px solid var(--color-danger-border); color:var(--color-danger);"></div>
       <div class="space-y-2">
-        <label class="text-xs font-semibold text-slate-600">Nội dung đoạn văn (sẽ được đối soát tự động qua Python Verifier):</label>
-        <textarea id="modal-narr-text" rows="6" class="w-full p-3 text-xs border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:outline-none leading-relaxed"></textarea>
+        <label class="text-xs font-semibold" style="color:var(--color-text-muted);">Nội dung đoạn văn (sẽ được đối soát tự động qua Python Verifier)</label>
+        <textarea id="modal-narr-text" rows="6" class="w-full p-3 text-xs rounded-lg leading-relaxed" style="border:1px solid var(--color-border-strong);"></textarea>
       </div>
       <div class="space-y-1">
-        <label class="text-xs font-semibold text-slate-600">Ghi chú giải trình của RM (tùy chọn):</label>
-        <input type="text" id="modal-narr-rm-note" placeholder="VD: Bổ sung chi tiết giải trình theo yêu cầu cấp thẩm quyền..." class="w-full p-2 text-xs border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:outline-none">
+        <label class="text-xs font-semibold" style="color:var(--color-text-muted);">Ghi chú giải trình của RM (tùy chọn)</label>
+        <input type="text" id="modal-narr-rm-note" placeholder="VD: Bổ sung chi tiết giải trình theo yêu cầu cấp thẩm quyền..." class="w-full p-2 text-xs rounded-lg" style="border:1px solid var(--color-border-strong);">
       </div>
       <div class="flex justify-end space-x-2 pt-2">
-        <button onclick="closeEditModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">Hủy</button>
-        <button onclick="saveAndRevalidateNarrative()" id="btn-modal-save" class="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold shadow">
-          ✓ Lưu & Tái Thẩm Định
-        </button>
+        <button onclick="closeEditModal()" class="btn btn-secondary btn-sm">Hủy</button>
+        <button onclick="saveAndRevalidateNarrative()" id="btn-modal-save" class="btn btn-primary btn-sm">Lưu &amp; Tái Thẩm Định</button>
       </div>
     </div>
   </div>
 
   <!-- MODAL: TẠO HỒ SƠ KHÁCH HÀNG MỚI -->
-  <div id="modal-new-case" class="hidden fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4">
-      <div class="flex justify-between items-center border-b pb-3">
-        <h3 class="font-bold text-base text-[#003366]">➕ Khởi Tạo Hồ Sơ Thẩm Định Mới</h3>
-        <button onclick="closeNewCaseModal()" class="text-slate-400 hover:text-slate-600 font-bold text-lg">&times;</button>
+  <div id="modal-new-case" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(15,23,42,0.55);">
+    <div class="rounded-xl max-w-xl w-full p-6 space-y-4" style="background:var(--color-surface); box-shadow:var(--shadow-md);">
+      <div class="flex justify-between items-center border-b pb-3" style="border-color:var(--color-border);">
+        <h3 class="section-title">Khởi tạo hồ sơ thẩm định mới</h3>
+        <button onclick="closeNewCaseModal()" class="btn-ghost btn btn-sm" style="font-size:16px;">&times;</button>
       </div>
       <div class="space-y-3 text-xs">
         <div>
-          <label class="font-semibold text-slate-700">Tên Doanh Nghiệp đầy đủ <span class="text-red-500">*</span>:</label>
-          <input type="text" id="new-case-name" placeholder="VD: CÔNG TY CỔ PHẦN THƯƠNG MẠI ALPHA" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+          <label class="font-semibold" style="color:var(--color-text-muted);">Tên Doanh nghiệp đầy đủ <span style="color:var(--color-danger);">*</span></label>
+          <input type="text" id="new-case-name" placeholder="VD: CÔNG TY CỔ PHẦN THƯƠNG MẠI ALPHA" class="w-full mt-1 p-2 rounded" style="border:1px solid var(--color-border-strong);">
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="font-semibold text-slate-700">Tên viết tắt / Mã gợi nhớ <span class="text-red-500">*</span>:</label>
-            <input type="text" id="new-case-short-name" placeholder="VD: ALPHA_JSC" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+            <label class="font-semibold" style="color:var(--color-text-muted);">Tên viết tắt / Mã gợi nhớ <span style="color:var(--color-danger);">*</span></label>
+            <input type="text" id="new-case-short-name" placeholder="VD: ALPHA_JSC" class="w-full mt-1 p-2 rounded" style="border:1px solid var(--color-border-strong);">
           </div>
           <div>
-            <label class="font-semibold text-slate-700">Mã số thuế <span class="text-red-500">*</span>:</label>
-            <input type="text" id="new-case-tax-code" placeholder="VD: 0312345678" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+            <label class="font-semibold" style="color:var(--color-text-muted);">Mã số thuế <span style="color:var(--color-danger);">*</span></label>
+            <input type="text" id="new-case-tax-code" placeholder="VD: 0312345678" class="w-full mt-1 p-2 rounded" style="border:1px solid var(--color-border-strong);">
           </div>
         </div>
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="font-semibold text-slate-700">Vốn điều lệ (triệu VND):</label>
-            <input type="number" id="new-case-capital" placeholder="VD: 50000" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+            <label class="font-semibold" style="color:var(--color-text-muted);">Vốn điều lệ (triệu VND)</label>
+            <input type="number" id="new-case-capital" placeholder="VD: 50000" class="w-full mt-1 p-2 rounded" style="border:1px solid var(--color-border-strong);">
           </div>
           <div>
-            <label class="font-semibold text-slate-700">Hạn mức đề xuất (triệu VND):</label>
-            <input type="number" id="new-case-limit" placeholder="VD: 100000" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+            <label class="font-semibold" style="color:var(--color-text-muted);">Hạn mức đề xuất (triệu VND)</label>
+            <input type="number" id="new-case-limit" placeholder="VD: 100000" class="w-full mt-1 p-2 rounded" style="border:1px solid var(--color-border-strong);">
           </div>
         </div>
         <div>
-          <label class="font-semibold text-slate-700">Địa chỉ đăng ký trụ sở:</label>
-          <input type="text" id="new-case-address" placeholder="VD: Số 123 Đường ABC, Phường Bến Nghé, Quận 1, TP.HCM" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500">
+          <label class="font-semibold" style="color:var(--color-text-muted);">Địa chỉ đăng ký trụ sở</label>
+          <input type="text" id="new-case-address" placeholder="VD: Số 123 Đường ABC, Phường Bến Nghé, Quận 1, TP.HCM" class="w-full mt-1 p-2 rounded" style="border:1px solid var(--color-border-strong);">
         </div>
         <div>
-          <label class="font-semibold text-slate-700">Mô hình kinh doanh:</label>
-          <select id="new-case-business-model" class="w-full mt-1 p-2 border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white">
+          <label class="font-semibold" style="color:var(--color-text-muted);">Mô hình kinh doanh</label>
+          <select id="new-case-business-model" class="w-full mt-1 p-2 rounded bg-white" style="border:1px solid var(--color-border-strong);">
             <option value="THUONG_MAI">Thương mại Phân phối</option>
             <option value="SAN_XUAT">Sản xuất</option>
             <option value="SAN_XUAT_VA_THUONG_MAI">Sản xuất & Thương mại</option>
@@ -1596,24 +1716,22 @@ HTML_PAGE = """<!DOCTYPE html>
           </select>
         </div>
       </div>
-      <div class="flex justify-end space-x-2 pt-3 border-t">
-        <button onclick="closeNewCaseModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">Hủy</button>
-        <button onclick="submitNewCase()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow">
-          ➕ Khởi Tạo Hồ Sơ
-        </button>
+      <div class="flex justify-end space-x-2 pt-3 border-t" style="border-color:var(--color-border);">
+        <button onclick="closeNewCaseModal()" class="btn btn-secondary btn-sm">Hủy</button>
+        <button onclick="submitNewCase()" class="btn btn-primary btn-sm">Khởi Tạo Hồ Sơ</button>
       </div>
     </div>
   </div>
 
   <!-- MODAL: ĐỐI SOÁT & XÁC NHẬN BÓC TÁCH (RM REVIEW MODAL) -->
-  <div id="modal-doc-review" class="hidden fixed inset-0 bg-slate-900/60 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl max-w-4xl w-full p-6 shadow-2xl space-y-4">
-      <div class="flex justify-between items-center border-b pb-3">
-        <div>
-          <h3 id="modal-review-title" class="font-bold text-base text-[#003366]">📋 Đối Soát Dữ Liệu Bóc Tách GreenNode AI</h3>
-          <p id="modal-review-subtitle" class="text-xs text-slate-500">Đối soát bằng chứng trang và giải quyết xung đột trước khi xác nhận vào hồ sơ MB07</p>
+  <div id="modal-doc-review" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4" style="background:rgba(15,23,42,0.55);">
+    <div class="rounded-xl max-w-4xl w-full p-6 space-y-4" style="background:var(--color-surface); box-shadow:var(--shadow-md);">
+      <div class="flex justify-between items-center border-b pb-3" style="border-color:var(--color-border);">
+        <div class="min-w-0">
+          <h3 id="modal-review-title" class="section-title">Đối soát Dữ liệu Bóc tách GreenNode AI</h3>
+          <p id="modal-review-subtitle" class="text-xs text-wrap-safe" style="color:var(--color-text-muted);">Đối soát bằng chứng trang và giải quyết xung đột trước khi xác nhận vào hồ sơ MB07</p>
         </div>
-        <button onclick="closeReviewModal()" class="text-slate-400 hover:text-slate-600 font-bold text-lg">&times;</button>
+        <button onclick="closeReviewModal()" class="btn-ghost btn btn-sm flex-none" style="font-size:16px;">&times;</button>
       </div>
 
       <!-- REVIEW CONTENT AREA -->
@@ -1621,15 +1739,13 @@ HTML_PAGE = """<!DOCTYPE html>
         <!-- Dynamic content injected by renderReviewBody -->
       </div>
 
-      <div class="flex items-center justify-between pt-3 border-t">
-        <div class="text-[11px] text-amber-700 bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
-          🛡️ <strong>Nguyên tắc MSB:</strong> Dữ liệu chỉ được xác nhận khi có số trang và trích dẫn bằng chứng xác thực.
+      <div class="flex items-center justify-between pt-3 border-t gap-3" style="border-color:var(--color-border);">
+        <div class="text-[11px] px-3 py-1.5 rounded-lg text-wrap-safe" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border); color:var(--color-warning);">
+          <strong>Nguyên tắc MSB:</strong> Dữ liệu chỉ được xác nhận khi có số trang và trích dẫn bằng chứng xác thực.
         </div>
-        <div class="flex space-x-2">
-          <button onclick="closeReviewModal()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold">Đóng / Xem Lại Sau</button>
-          <button id="btn-confirm-review" onclick="confirmCurrentReview()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow flex items-center space-x-1.5">
-            <span>✓ Xác Nhận Vào Hồ Sơ (Commit)</span>
-          </button>
+        <div class="flex space-x-2 flex-none">
+          <button onclick="closeReviewModal()" class="btn btn-secondary btn-sm">Đóng</button>
+          <button id="btn-confirm-review" onclick="confirmCurrentReview()" class="btn btn-success btn-sm">Xác Nhận Vào Hồ Sơ</button>
         </div>
       </div>
     </div>
@@ -1640,6 +1756,22 @@ HTML_PAGE = """<!DOCTYPE html>
     let CURRENT_ACTIVE_TAB = 'tab-dashboard';
     let CURRENT_CASE_ID = 'PSD';
     let CURRENT_REVIEW_DOCTYPE = null;
+
+    // Sidebar workflow-state tracking (visual only). Each flag reflects a real,
+    // already-tracked signal — never inferred merely from unrelated data existing.
+    const VISITED_TABS = new Set(['tab-dashboard']);
+    let SECTION_A_SAVED = false;
+    let SECTION_B_SAVED = false;
+
+    // Same business-model labels already used by the "new case" / business-review
+    // <select> options elsewhere in this page — reused here for display only.
+    const BUSINESS_MODEL_LABELS = {
+      THUONG_MAI: 'Thương mại Phân phối',
+      SAN_XUAT: 'Sản xuất',
+      SAN_XUAT_VA_THUONG_MAI: 'Sản xuất & Thương mại',
+      DICH_VU: 'Dịch vụ',
+      XAY_DUNG_BAT_DONG_SAN: 'Xây dựng & Bất động sản',
+    };
 
     const DOC_STATES = {
       legal: { state: 'RM_CONFIRMED', filename: 'Giay_Phep_DKKD_PSD.pdf', previewId: null, previewData: null },
@@ -1669,6 +1801,7 @@ HTML_PAGE = """<!DOCTYPE html>
       if (tabId === 'tab-narrative') {
         loadNarrativeState(CURRENT_CASE_ID);
       }
+      if (typeof updateSidebarProgress === 'function') updateSidebarProgress();
     }
 
     function readFileAsBase64(file) {
@@ -1710,15 +1843,16 @@ HTML_PAGE = """<!DOCTYPE html>
       const confirmedCount = keys.filter(k => DOC_STATES[k].state === 'RM_CONFIRMED').length;
       const badge = document.getElementById('doc-workspace-badge');
       if (badge) {
-        badge.innerText = `${confirmedCount}/4 Nhóm Tài Liệu Sẵn Sàng`;
+        badge.innerText = `${confirmedCount}/4 nhóm tài liệu đã nạp`;
         if (confirmedCount === 4) {
-          badge.className = 'text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded';
+          badge.className = 'chip chip-success';
         } else if (confirmedCount > 0) {
-          badge.className = 'text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-1 rounded';
+          badge.className = 'chip chip-info';
         } else {
-          badge.className = 'text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-1 rounded';
+          badge.className = 'chip chip-neutral';
         }
       }
+      updateSidebarProgress();
     }
 
     function updateDocCardUI(docType) {
@@ -1738,72 +1872,56 @@ HTML_PAGE = """<!DOCTYPE html>
 
       switch (info.state) {
         case 'NOT_UPLOADED':
-          badgeHtml = '<span class="text-xs bg-slate-100 text-slate-500 font-semibold px-2 py-0.5 rounded border border-slate-200">⚪ Chưa tải lên</span>';
+          badgeHtml = '<span class="chip chip-neutral">Not uploaded</span>';
           actionButtons = `
-            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-[#003366] hover:bg-blue-900 text-white rounded text-xs font-bold shadow-sm transition flex items-center space-x-1">
-              <span>📤 Tải Lên PDF</span>
-            </button>
+            <button onclick="triggerDocUpload('${docType}')" class="btn btn-primary btn-sm">Tải lên PDF</button>
           `;
           tipText = 'Chờ RM tải lên tài liệu PDF gốc';
           break;
 
         case 'UPLOADING':
-          badgeHtml = '<span class="text-xs bg-blue-100 text-blue-800 font-semibold px-2 py-0.5 rounded animate-pulse border border-blue-200">⏳ Đang tải lên...</span>';
-          actionButtons = '<button disabled class="px-3 py-1 bg-slate-200 text-slate-400 rounded text-xs font-medium cursor-not-allowed">Đang tải...</button>';
+          badgeHtml = '<span class="chip chip-info">Uploading…</span>';
+          actionButtons = '<button disabled class="btn btn-secondary btn-sm">Đang tải...</button>';
           tipText = 'Đang chuyển tệp lên máy chủ...';
           break;
 
         case 'AI_PROCESSING':
-          badgeHtml = '<span class="text-xs bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded animate-pulse border border-purple-200">🤖 GreenNode AI Đang Bóc Tách...</span>';
-          actionButtons = '<button disabled class="px-3 py-1 bg-purple-100 text-purple-700 rounded text-xs font-semibold cursor-not-allowed">Đang xử lý AI...</button>';
+          badgeHtml = '<span class="chip chip-info">AI extracting…</span>';
+          actionButtons = '<button disabled class="btn btn-secondary btn-sm">Đang xử lý AI...</button>';
           tipText = 'Mô hình GLM-5.2 / OCR đang trích xuất và đối soát trang...';
           break;
 
         case 'PREVIEW_READY':
-          badgeHtml = '<span class="text-xs bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded border border-amber-300">📋 Chờ RM Xác Nhận</span>';
+          badgeHtml = '<span class="chip chip-warning">Needs review</span>';
           actionButtons = `
-            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
-              🔄 Chọn file khác
-            </button>
-            <button onclick="openReviewModal('${docType}')" class="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-white rounded text-xs font-bold shadow-sm transition">
-              🔍 Đối Soát & Xác Nhận
-            </button>
+            <button onclick="triggerDocUpload('${docType}')" class="btn btn-secondary btn-sm">Chọn file khác</button>
+            <button onclick="openReviewModal('${docType}')" class="btn btn-primary btn-sm">Đối soát &amp; Xác nhận</button>
           `;
           tipText = 'AI đã bóc tách xong! Bấm để đối soát bằng chứng trang và xác nhận';
           break;
 
         case 'CONFLICT':
-          badgeHtml = '<span class="text-xs bg-orange-100 text-orange-800 font-bold px-2 py-0.5 rounded border border-orange-300">⚠️ Phát Hiện Xung Đột</span>';
+          badgeHtml = '<span class="chip chip-warning">Conflict</span>';
           actionButtons = `
-            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
-              🔄 Chọn file khác
-            </button>
-            <button onclick="openReviewModal('${docType}')" class="px-3 py-1 bg-orange-600 hover:bg-orange-700 text-white rounded text-xs font-bold shadow-sm transition">
-              ⚖️ Xử Lý Xung Đột
-            </button>
+            <button onclick="triggerDocUpload('${docType}')" class="btn btn-secondary btn-sm">Chọn file khác</button>
+            <button onclick="openReviewModal('${docType}')" class="btn btn-primary btn-sm">Xử lý xung đột</button>
           `;
           tipText = 'Số liệu tài liệu xung đột với hồ sơ! Cần RM lựa chọn số liệu chuẩn';
           break;
 
         case 'RM_CONFIRMED':
-          badgeHtml = '<span class="text-xs bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded border border-emerald-300">✓ Đã Xác Nhận Vào Hồ Sơ</span>';
+          badgeHtml = '<span class="chip chip-success">Confirmed</span>';
           actionButtons = `
-            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded text-xs font-semibold shadow-sm transition">
-              🔄 Thay thế PDF
-            </button>
-            <button onclick="openReviewModal('${docType}')" class="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs font-bold shadow-sm transition">
-              🔍 Xem Lại Bóc Tách
-            </button>
+            <button onclick="triggerDocUpload('${docType}')" class="btn btn-secondary btn-sm">Thay thế PDF</button>
+            <button onclick="openReviewModal('${docType}')" class="btn btn-primary btn-sm">Xem lại</button>
           `;
           tipText = 'Dữ liệu đã được khóa và đồng bộ vào Tờ trình MB07';
           break;
 
         case 'ERROR':
-          badgeHtml = '<span class="text-xs bg-red-100 text-red-800 font-bold px-2 py-0.5 rounded border border-red-300">❌ Lỗi Xử Lý</span>';
+          badgeHtml = '<span class="chip chip-danger">Error</span>';
           actionButtons = `
-            <button onclick="triggerDocUpload('${docType}')" class="px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs font-bold shadow-sm transition">
-              🔄 Thử lại
-            </button>
+            <button onclick="triggerDocUpload('${docType}')" class="btn btn-danger btn-sm">Thử lại</button>
           `;
           tipText = info.errorMsg || 'Xử lý tài liệu không thành công';
           break;
@@ -1813,8 +1931,8 @@ HTML_PAGE = """<!DOCTYPE html>
       if (tipEl) tipEl.innerText = tipText;
       if (actionsEl) {
         actionsEl.innerHTML = `
-          <span id="tip-${docType}" class="text-[11px] text-slate-400 italic">${tipText}</span>
-          <div class="flex space-x-2">${actionButtons}</div>
+          <span id="tip-${docType}" class="text-[11px] text-wrap-safe" style="color:var(--color-text-faint);">${tipText}</span>
+          <div class="flex space-x-2 flex-none">${actionButtons}</div>
         `;
       }
       updateWorkspaceHeaderBadge();
@@ -2028,22 +2146,22 @@ HTML_PAGE = """<!DOCTYPE html>
           let resolutionControl = '';
 
           if (f.status === 'CONFLICT') {
-            statusBadge = '<span class="text-[10px] bg-orange-100 text-orange-800 font-bold px-1.5 py-0.5 rounded border border-orange-200">XUNG ĐỘT</span>';
+            statusBadge = '<span class="chip chip-warning">Xung đột</span>';
             resolutionControl = `
               <div class="mt-1 space-y-1">
-                <div class="text-[10px] text-orange-700 font-medium">${f.conflict_note || ''}</div>
-                <select id="res-legal-${k}" class="w-full text-[11px] p-1 bg-orange-50 border border-orange-300 rounded focus:ring-1 focus:ring-orange-500 font-medium">
+                <div class="text-[10px]" style="color:var(--color-warning);">${f.conflict_note || ''}</div>
+                <select id="res-legal-${k}" class="w-full text-[11px] p-1 rounded font-medium" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
                   <option value="USE_EXTRACTED">✓ Lấy số liệu mới bóc tách</option>
                   <option value="KEEP_EXISTING">✕ Giữ số liệu hồ sơ hiện tại</option>
                 </select>
               </div>
             `;
           } else if (f.status === 'WARNING') {
-            statusBadge = `<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded border border-amber-200" title="${f.warning_reason || ''}">CẢNH BÁO</span>`;
+            statusBadge = `<span class="chip chip-warning" title="${f.warning_reason || ''}">Cảnh báo</span>`;
           } else if (f.status === 'MISSING') {
-            statusBadge = '<span class="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded border border-slate-200">CHƯA CÓ</span>';
+            statusBadge = '<span class="chip chip-neutral">Chưa có</span>';
           } else {
-            statusBadge = '<span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded border border-emerald-200">✓ XÁC THỰC</span>';
+            statusBadge = '<span class="chip chip-success">Xác thực</span>';
           }
 
           html += `
@@ -2112,20 +2230,20 @@ HTML_PAGE = """<!DOCTYPE html>
           let statusBadge = '';
           let resControl = '';
           if (item.status === 'CONFLICT') {
-            statusBadge = '<span class="text-[10px] bg-orange-100 text-orange-800 font-bold px-1.5 py-0.5 rounded">XUNG ĐỘT</span>';
+            statusBadge = '<span class="chip chip-warning">Xung đột</span>';
             resControl = `
               <div class="mt-1">
-                <div class="text-[10px] text-orange-700">${item.conflict_note || ''}</div>
-                <select id="res-fin-${item.canonical_field}-${item.year}" class="w-full text-[10px] p-1 bg-orange-50 border border-orange-300 rounded font-medium">
+                <div class="text-[10px]" style="color:var(--color-warning);">${item.conflict_note || ''}</div>
+                <select id="res-fin-${item.canonical_field}-${item.year}" class="w-full text-[10px] p-1 rounded font-medium" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
                   <option value="USE_EXTRACTED">✓ Dùng số liệu BCTC</option>
                   <option value="KEEP_EXISTING">✕ Giữ số liệu cũ</option>
                 </select>
               </div>
             `;
           } else if (item.status === 'WARNING') {
-            statusBadge = '<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">CẢNH BÁO</span>';
+            statusBadge = '<span class="chip chip-warning">Cảnh báo</span>';
           } else {
-            statusBadge = '<span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.5 rounded">✓ EXTRACTED</span>';
+            statusBadge = '<span class="chip chip-success">Extracted</span>';
           }
 
           html += `
@@ -2443,6 +2561,7 @@ HTML_PAGE = """<!DOCTYPE html>
         if (data.status === 'success') {
           const cid = data.case_id;
           CURRENT_CASE_ID = cid;
+          resetPerCaseFrontendState();
 
           // Add to case selector if not exists
           const selector = document.getElementById('case-selector');
@@ -2515,6 +2634,8 @@ HTML_PAGE = """<!DOCTYPE html>
         });
         const data = await res.json();
         if (data.status === 'success') {
+          SECTION_A_SAVED = true;
+          updateSidebarProgress();
           alert('✅ Đã lưu thông tin Pháp lý & ĐVKD Phần A thành công!');
         } else {
           alert('Lỗi lưu Phần A: ' + data.message);
@@ -2541,6 +2662,8 @@ HTML_PAGE = """<!DOCTYPE html>
         });
         const data = await res.json();
         if (data.status === 'success') {
+          SECTION_B_SAVED = true;
+          updateSidebarProgress();
           alert('✅ Đã lưu đề xuất cấp tín dụng Phần B thành công!');
           loadCaseData();
         } else {
@@ -2559,6 +2682,7 @@ HTML_PAGE = """<!DOCTYPE html>
         CURRENT_CASE_ID = data.id || 'PSD';
         const cust = data.customer || {};
         const b = data.section_b || {};
+        const c = data.section_c || {};
         const d = data.section_d || {};
         const e = data.section_e || {};
         const rm = data.rm_metadata || {};
@@ -2580,40 +2704,44 @@ HTML_PAGE = """<!DOCTYPE html>
           }
         }
 
-        // Dashboard fields with empty-state handling
-        const custTitle = `${cust.short_name || cust.name || 'DOANH NGHIỆP MỚI'} (CIF: ${cust.cif || 'Chưa cấp'})`;
-        document.getElementById('dash-cust-name').innerText = custTitle;
-        
+        // Dashboard fields with empty-state handling.
+        // KPI cards show a concise headline value; full precision/raw canonical
+        // numbers are untouched — only how they're displayed here changes.
+        document.getElementById('dash-cust-name').innerText = cust.short_name || cust.name || 'DOANH NGHIỆP MỚI';
+        document.getElementById('dash-cust-cif').innerText = `CIF: ${cust.cif || 'Chưa cấp'}`;
+
         if (cust.rating_grade) {
-          document.getElementById('dash-cust-rating').innerText = `Định hạng MSB: Hạng ${cust.rating_grade} (${cust.rating_score || 0}đ)`;
+          document.getElementById('dash-cust-rating').innerText = `Hạng ${cust.rating_grade} · ${cust.rating_score || 0}đ`;
         } else {
-          document.getElementById('dash-cust-rating').innerText = `Định hạng MSB: Chưa xếp hạng (Chờ thẩm định)`;
+          document.getElementById('dash-cust-rating').innerText = 'Chưa xếp hạng';
         }
 
         const totalLimit = b.total_limit || 0;
-        document.getElementById('dash-total-limit').innerText = `${totalLimit.toLocaleString('vi-VN')} triệu VND`;
-        document.getElementById('dash-loan-limit').innerText = `Cho vay: ${(b.loan_limit || 0).toLocaleString('vi-VN')} tr | Bảo lãnh: ${(b.guarantee_limit || 0).toLocaleString('vi-VN')} tr`;
-        
+        document.getElementById('dash-total-limit').innerText = formatVndCompact(totalLimit);
+        document.getElementById('dash-loan-limit').innerText = `Vay ${toTyVnd(b.loan_limit || 0)} tỷ · Bảo lãnh ${toTyVnd(b.guarantee_limit || 0)} tỷ`;
+
         const revArr = d.net_revenue || [];
         const npArr = d.net_profit_after_tax || [];
         const hasFin = revArr.length > 0 && revArr[revArr.length - 1] > 0;
-        
+
         if (hasFin) {
           const revLast = revArr[revArr.length - 1];
           const npLast = npArr.length > 0 ? npArr[npArr.length - 1] : 0;
-          document.getElementById('dash-rev-2025').innerText = `${revLast.toLocaleString('vi-VN')} triệu VND`;
-          document.getElementById('dash-np-2025').innerText = `LNST: ${npLast.toLocaleString('vi-VN')} tr`;
+          document.getElementById('dash-rev-2025').innerText = formatVndCompact(revLast);
+          document.getElementById('dash-np-2025').innerText = `LNST ${toTyVnd(npLast)} tỷ`;
         } else {
           document.getElementById('dash-rev-2025').innerText = 'Chưa nạp BCTC';
           document.getElementById('dash-np-2025').innerText = 'LNST: Chưa có số liệu';
         }
 
-        document.getElementById('dash-cic-status').innerText = e.history_status || 'Chưa tra cứu CIC';
-        document.getElementById('dash-msb-out').innerText = `Dư nợ tại MSB: ${(e.msb_outstanding || 0).toLocaleString('vi-VN')} triệu VND`;
+        const cic = splitCicStatus(e.history_status);
+        document.getElementById('dash-cic-status').innerText = cic.main;
+        document.getElementById('dash-cic-meta').innerText = cic.meta;
+        document.getElementById('dash-msb-out').innerText = `Dư nợ tại MSB: ${toTyVnd(e.msb_outstanding || 0)} tỷ`;
 
         document.getElementById('dash-tax-code').innerText = cust.tax_code || 'Chưa có MST';
         document.getElementById('dash-legal-rep').innerText = cust.legal_rep_name ? `${cust.legal_rep_name} (${cust.legal_rep_title || 'Đại diện'})` : 'Chưa cập nhật';
-        document.getElementById('dash-capital').innerText = cust.charter_capital ? `${cust.charter_capital.toLocaleString('vi-VN')} triệu VND` : 'Chưa cập nhật';
+        document.getElementById('dash-capital').innerText = cust.charter_capital ? formatVndCompact(cust.charter_capital) : 'Chưa cập nhật';
         document.getElementById('dash-address').innerText = cust.address || 'Chưa cập nhật';
         
         document.getElementById('dash-purpose').innerText = b.loan_purpose || 'Chưa có thông tin';
@@ -2634,6 +2762,46 @@ HTML_PAGE = """<!DOCTYPE html>
         if (document.getElementById('rm-collateral')) document.getElementById('rm-collateral').value = b.collateral_type || '';
         if (document.getElementById('rm-purpose')) document.getElementById('rm-purpose').value = b.loan_purpose || '';
 
+        // Keep the Document Workspace summary snippets in sync with the active case.
+        // Previously these only updated after a fresh upload/extraction or when
+        // creating a brand new case, so switching between existing demo cases left
+        // the PREVIOUS case's (or the original static placeholder's) text behind.
+        // Live extraction results (updateCardSummarySnippet) still run afterward and
+        // correctly take precedence within the same session.
+        document.getElementById('sum-legal-name').innerText = cust.name || 'Chưa cập nhật';
+        document.getElementById('sum-legal-tax').innerText = cust.tax_code || 'Chưa cập nhật';
+        document.getElementById('sum-legal-capital').innerText = cust.charter_capital ? `${cust.charter_capital.toLocaleString('vi-VN')} tr` : 'Chưa cập nhật';
+        document.getElementById('sum-legal-rep').innerText = cust.legal_rep_name ? `${cust.legal_rep_name} (${cust.legal_rep_title || 'Đại diện'})` : 'Chưa cập nhật';
+
+        document.getElementById('sum-biz-model').innerText = BUSINESS_MODEL_LABELS[c.business_model] || c.business_model || 'Chưa cập nhật';
+        const bizSuppliers = Array.isArray(c.suppliers) ? c.suppliers : [];
+        document.getElementById('sum-biz-suppliers').innerText = bizSuppliers.length
+          ? bizSuppliers.slice(0, 3).map(s => `${s.name} (${s.share}%)`).join(', ')
+          : 'Chưa nạp hồ sơ kinh doanh';
+        const bizCustomers = Array.isArray(c.customers) ? c.customers : [];
+        document.getElementById('sum-biz-customers').innerText = bizCustomers.length
+          ? bizCustomers.slice(0, 3).map(cu => `${cu.name} (${cu.share}%)`).join(', ')
+          : 'Chưa nạp hồ sơ kinh doanh';
+
+        document.getElementById('sum-fin-auditor').innerText = d.auditor || 'Chưa nạp BCTC';
+        const equityArr = d.equity || [];
+        if (hasFin) {
+          const revLastSum = revArr[revArr.length - 1];
+          const npLastSum = npArr.length > 0 ? npArr[npArr.length - 1] : 0;
+          const eqLastSum = equityArr.length > 0 ? equityArr[equityArr.length - 1] : 0;
+          document.getElementById('sum-fin-rev').innerText = `${revLastSum.toLocaleString('vi-VN')} tr`;
+          document.getElementById('sum-fin-np').innerText = `${npLastSum.toLocaleString('vi-VN')} tr`;
+          document.getElementById('sum-fin-equity').innerText = `${eqLastSum.toLocaleString('vi-VN')} tr`;
+        } else {
+          document.getElementById('sum-fin-rev').innerText = 'Chưa có số liệu';
+          document.getElementById('sum-fin-np').innerText = 'Chưa có số liệu';
+          document.getElementById('sum-fin-equity').innerText = 'Chưa có số liệu';
+        }
+
+        document.getElementById('sum-cic-date').innerText = e.cic_date || 'Chưa tra cứu';
+        document.getElementById('sum-cic-status').innerText = e.history_status || 'Chưa có dữ liệu CIC';
+        document.getElementById('sum-cic-msb').innerText = e.msb_outstanding != null ? `${e.msb_outstanding.toLocaleString('vi-VN')} tr` : 'Chưa có dữ liệu';
+
       } catch (err) {
         console.error("Error loading case data:", err);
       }
@@ -2641,7 +2809,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
     async function loadCommitteeCards() {
       const container = document.getElementById('committee-cards-container');
-      container.innerHTML = '<div class="p-6 text-center text-slate-500">⏳ Đang tổng hợp các câu hỏi chất vấn từ dữ liệu hồ sơ...</div>';
+      container.innerHTML = '<div class="p-6 text-center text-xs" style="color:var(--color-text-muted);">Đang tổng hợp các câu hỏi chất vấn từ dữ liệu hồ sơ...</div>';
 
       try {
         const res = await fetch('/api/committee_prep');
@@ -2649,62 +2817,59 @@ HTML_PAGE = """<!DOCTYPE html>
         const cards = data.cards || [];
 
         if (cards.length === 0) {
-          container.innerHTML = '<div class="p-6 text-center text-emerald-700 bg-emerald-50 rounded-xl">✓ Hồ sơ hoàn hảo, không phát hiện rủi ro bất thường.</div>';
+          container.innerHTML = `<div class="panel p-6 text-center text-sm" style="color:var(--color-success);">Hồ sơ hoàn thiện — không phát hiện rủi ro bất thường.</div>`;
           return;
         }
 
         let html = '';
         cards.forEach((c, idx) => {
-          const sevColor = c.severity === 'HIGH' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-amber-100 text-amber-800 border-amber-200';
-          const sevText = c.severity === 'HIGH' ? 'CẦN BẢO VỆ CAO' : 'QUAN TRỌNG';
+          const sevChip = c.severity === 'HIGH' ? '<span class="chip chip-danger">Cần bảo vệ cao</span>' : '<span class="chip chip-warning">Quan trọng</span>';
 
           let factsHtml = '';
           (c.facts_to_prepare || []).forEach(f => {
-            factsHtml += `<div><span class="text-slate-500">${f.label}:</span> <span class="font-semibold text-slate-800">${f.value}</span></div>`;
+            factsHtml += `<div class="text-wrap-safe"><span style="color:var(--color-text-muted);">${escapeHtml(f.label)}:</span> <span class="font-semibold" style="color:var(--color-text);">${escapeHtml(String(f.value))}</span></div>`;
           });
 
           let defenseHtml = '';
           (c.suggested_defense_points || []).forEach(p => {
-            defenseHtml += `<li class="text-slate-700">${p}</li>`;
+            defenseHtml += `<li class="text-wrap-safe" style="color:var(--color-text);">${escapeHtml(p)}</li>`;
           });
 
           html += `
-            <div class="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
-              <div class="flex items-start justify-between">
-                <div class="flex items-center space-x-2">
-                  <span class="w-6 h-6 rounded-full bg-[#003366] text-white flex items-center justify-center text-xs font-bold">${idx + 1}</span>
-                  <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">${c.category}</span>
+            <div class="panel p-5 space-y-4">
+              <div class="flex items-start justify-between gap-2">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="nav-item-step" style="background:var(--color-primary); color:#fff;">${idx + 1}</span>
+                  <span class="text-xs font-semibold uppercase tracking-wide text-wrap-safe" style="color:var(--color-text-muted);">${escapeHtml(c.category)}</span>
                 </div>
-                <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full border ${sevColor}">${sevText}</span>
+                <div class="flex-none">${sevChip}</div>
               </div>
 
               <div>
-                <h4 class="text-sm font-bold text-[#003366] leading-snug">❓ "${c.question}"</h4>
-                <div class="mt-1.5 text-xs text-slate-600 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
-                  <span class="font-semibold text-slate-700">🎯 Nguyên nhân chất vấn:</span> ${c.why_asked}
+                <h4 class="text-sm font-semibold leading-snug text-wrap-safe" style="color:var(--color-primary);">"${escapeHtml(c.question)}"</h4>
+                <div class="mt-1.5 text-xs p-2.5 rounded-md text-wrap-safe" style="background:var(--color-bg); border:1px solid var(--color-border); color:var(--color-text-muted);">
+                  <span class="font-semibold" style="color:var(--color-text);">Nguyên nhân chất vấn:</span> ${escapeHtml(c.why_asked)}
                 </div>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                <div class="space-y-1.5 bg-blue-50/50 p-3 rounded-lg border border-blue-100">
-                  <div class="font-bold text-blue-900">📊 Dữ liệu thực tế RM cần chuẩn bị:</div>
+                <div class="space-y-1.5 p-3 rounded-md" style="background:var(--color-bg); border:1px solid var(--color-border);">
+                  <div class="font-semibold" style="color:var(--color-text);">Dữ liệu thực tế RM cần chuẩn bị</div>
                   <div class="space-y-1">${factsHtml}</div>
                 </div>
 
-                <div class="space-y-1.5 bg-emerald-50/50 p-3 rounded-lg border border-emerald-100">
-                  <div class="font-bold text-emerald-900">🛡️ Luận điểm giải trình gợi ý:</div>
+                <div class="space-y-1.5 p-3 rounded-md" style="background:var(--color-success-bg); border:1px solid var(--color-success-border);">
+                  <div class="font-semibold" style="color:var(--color-success);">Luận điểm giải trình gợi ý</div>
                   <ul class="list-disc list-inside space-y-1">${defenseHtml}</ul>
                 </div>
               </div>
 
-              <div class="space-y-1.5 pt-2 border-t border-slate-100">
-                <div class="flex justify-between items-center">
-                  <label class="text-xs font-bold text-slate-700">📝 Ghi chú giải trình của RM:</label>
-                  <button onclick="saveCommitteeNote('${c.question_id}')" class="text-xs bg-slate-800 hover:bg-slate-900 text-white font-semibold px-3 py-1 rounded shadow transition">
-                    💾 Lưu ghi chú
-                  </button>
+              <div class="space-y-1.5 pt-2 border-t" style="border-color:var(--color-border);">
+                <div class="flex justify-between items-center gap-2">
+                  <label class="text-xs font-semibold" style="color:var(--color-text-muted);">Ghi chú giải trình của RM</label>
+                  <button onclick="saveCommitteeNote('${c.question_id}')" class="btn btn-secondary btn-sm flex-none">Lưu ghi chú</button>
                 </div>
-                <textarea id="note-${c.question_id}" rows="2" placeholder="Nhập ghi chú phản biện của RM khi ra Hội đồng..." class="w-full p-2.5 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500">${c.rm_note || ''}</textarea>
+                <textarea id="note-${c.question_id}" rows="2" placeholder="Nhập ghi chú phản biện của RM khi ra Hội đồng..." class="w-full p-2.5 text-xs rounded-lg" style="border:1px solid var(--color-border-strong);">${escapeHtml(c.rm_note || '')}</textarea>
               </div>
             </div>
           `;
@@ -2712,7 +2877,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
         container.innerHTML = html;
       } catch (e) {
-        container.innerHTML = `<div class="p-4 text-red-600 text-xs">Lỗi nạp câu hỏi: ${e.message}</div>`;
+        container.innerHTML = `<div class="p-4 text-xs" style="color:var(--color-danger);">Lỗi nạp câu hỏi: ${escapeHtml(e.message)}</div>`;
       }
     }
 
@@ -2734,6 +2899,23 @@ HTML_PAGE = """<!DOCTYPE html>
       }
     }
 
+    /* Resets frontend-only, per-case tracking flags (sidebar progress signals and the
+       "has this document card been exported" flag) so they never carry over from a
+       previously active case. Called whenever the active case changes underneath us
+       (switch or demo reset) — never called on a plain tab switch within the same
+       case. */
+    function resetPerCaseFrontendState() {
+      SECTION_A_SAVED = false;
+      SECTION_B_SAVED = false;
+      VISITED_TABS.clear();
+      VISITED_TABS.add(CURRENT_ACTIVE_TAB);
+      window.__MB07_EXPORTED__ = false;
+      const resBox = document.getElementById('export-result');
+      if (resBox) resBox.classList.add('hidden');
+      const qaPanel = document.getElementById('qa-result-panel');
+      if (qaPanel) { qaPanel.classList.add('hidden'); qaPanel.innerHTML = ''; }
+    }
+
     async function resetDemoCase() {
       const caseSelector = document.getElementById('case-selector');
       const cid = caseSelector ? caseSelector.value : 'PSD';
@@ -2743,9 +2925,11 @@ HTML_PAGE = """<!DOCTYPE html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ case_id: cid })
         });
+        resetPerCaseFrontendState();
         await loadCaseData();
         if (CURRENT_ACTIVE_TAB === 'tab-committee') loadCommitteeCards();
         if (CURRENT_ACTIVE_TAB === 'tab-narrative') loadNarrativeState(cid);
+        updateSidebarProgress();
         alert(`⚡ Đã nạp lại dữ liệu demo chuẩn cho hồ sơ '${cid}'!`);
       } catch (e) {
         alert('Lỗi reset demo: ' + e.message);
@@ -2762,6 +2946,7 @@ HTML_PAGE = """<!DOCTYPE html>
         const data = await res.json();
         if (data.status === 'success') {
           CURRENT_CASE_ID = caseId;
+          resetPerCaseFrontendState();
           const isDemo = ['PSD', 'GAS_SOUTH', 'PHYTOPHARMA'].includes(caseId);
           if (isDemo) {
             const prefix = caseId === 'PSD' ? 'PSD' : (caseId === 'GAS_SOUTH' ? 'GasSouth' : 'Phytopharma');
@@ -2778,6 +2963,7 @@ HTML_PAGE = """<!DOCTYPE html>
           await loadCaseData();
           if (CURRENT_ACTIVE_TAB === 'tab-committee') loadCommitteeCards();
           if (CURRENT_ACTIVE_TAB === 'tab-narrative') loadNarrativeState(caseId);
+          updateSidebarProgress();
         }
       } catch (e) {
         console.error(e);
@@ -2792,6 +2978,38 @@ HTML_PAGE = """<!DOCTYPE html>
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#039;");
+    }
+
+    /* Presentation-only VND formatting helpers for concise KPI cards.
+       Canonical values (always in triệu VND, unchanged) are never modified — these
+       only control how numbers already returned by the backend are displayed. */
+    function toTyVnd(millionValue) {
+      const v = Number(millionValue) || 0;
+      return (v / 1000).toLocaleString('vi-VN', { maximumFractionDigits: 1 });
+    }
+    function formatVndCompact(millionValue) {
+      const v = Number(millionValue) || 0;
+      if (Math.abs(v) >= 1000) {
+        return `${toTyVnd(v)} tỷ VND`;
+      }
+      return `${v.toLocaleString('vi-VN')} triệu VND`;
+    }
+    /* Extracts a short CIC headline from the full history_status sentence
+       (e.g. "100% Nhóm 1 (Đủ tiêu chuẩn) trong 24 tháng gần nhất tại MSB và các
+       TCTD." -> headline "Nhóm 1", meta "100% lịch sử tín dụng đạt chuẩn").
+       Never uses the full sentence as the KPI headline. If no debt-group token
+       ("Nhóm N") is found, falls back to showing the raw string verbatim with
+       no meta line rather than guessing/inventing data. Built from existing
+       data only — history_status is not altered, only re-presented. */
+    function splitCicStatus(raw) {
+      const s = String(raw || '').trim();
+      const groupMatch = s.match(/Nhóm\\s*\\d+/i);
+      if (groupMatch) {
+        const pctMatch = s.match(/^(\\d+(?:[.,]\\d+)?)%/);
+        const meta = pctMatch ? `${pctMatch[1]}% lịch sử tín dụng đạt chuẩn` : '';
+        return { main: groupMatch[0].replace(/\\s+/g, ' '), meta };
+      }
+      return { main: s || 'Chưa tra cứu CIC', meta: '' };
     }
 
     let NARRATIVE_STATE = {
@@ -3071,101 +3289,94 @@ HTML_PAGE = """<!DOCTYPE html>
 
       const state = NARRATIVE_STATE.status || 'READY';
 
+      const genBtn = document.getElementById('btn-generate-main');
+
       switch (state) {
         case 'NOT_READY':
-          badgeEl.className = 'text-xs bg-slate-100 text-slate-600 font-bold px-2.5 py-0.5 rounded border border-slate-300';
+          badgeEl.className = 'chip chip-neutral';
           badgeEl.innerText = 'Chưa Đủ Dữ Liệu';
           actionsEl.innerHTML = `
-            <button disabled class="px-4 py-2 bg-slate-200 text-slate-400 rounded-lg text-xs font-bold cursor-not-allowed flex items-center space-x-1.5" title="Cần tối thiểu thông tin pháp lý và BCTC đã xác nhận">
-              <span>🚀 Tạo Nhận Định AI</span>
+            <button disabled class="btn btn-secondary btn-sm" title="Cần tối thiểu thông tin pháp lý và BCTC đã xác nhận">
+              Tạo Nhận Định AI
             </button>
           `;
           alertEl.innerHTML = `
-            <div class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-start space-x-3">
-              <span class="text-base">⚠️</span>
+            <div class="p-4 rounded-lg text-xs flex items-start space-x-3" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border); color:var(--color-warning);">
               <div>
-                <div class="font-bold text-amber-900 mb-1">Chưa đủ dữ liệu để tạo nhận định.</div>
-                <p class="leading-relaxed">${escapeHtml(NARRATIVE_STATE.error || 'Hồ sơ chưa có đủ dữ liệu canonical (tên doanh nghiệp và BCTC). Vui lòng chuyển sang tab [📂 2. Không Gian Tài Liệu] để tải lên và đối soát tài liệu trước khi tạo nhận định AI.')}</p>
+                <div class="font-bold mb-1">Chưa đủ dữ liệu để tạo nhận định.</div>
+                <p class="leading-relaxed">${escapeHtml(NARRATIVE_STATE.error || 'Hồ sơ chưa có đủ dữ liệu canonical (tên doanh nghiệp và BCTC). Vui lòng chuyển sang [2. Không gian Tài liệu] để tải lên và đối soát tài liệu trước khi tạo nhận định AI.')}</p>
               </div>
             </div>
           `;
           if (telemetryEl) telemetryEl.classList.add('hidden');
+          if (genBtn) { genBtn.disabled = true; genBtn.className = 'btn btn-secondary btn-lg w-full md:w-2/3'; }
           break;
 
         case 'READY':
-          badgeEl.className = 'text-xs bg-blue-100 text-blue-800 font-bold px-2.5 py-0.5 rounded border border-blue-200';
+          badgeEl.className = 'chip chip-info';
           badgeEl.innerText = 'Sẵn Sàng Tạo Nhận Định';
           actionsEl.innerHTML = `
-            <button onclick="generateNarrative()" id="btn-narrative-generate" class="px-4 py-2 bg-[#003366] hover:bg-blue-900 text-white rounded-lg text-xs font-bold shadow flex items-center space-x-1.5 transition">
-              <span>🚀 Tạo Nhận Định AI</span>
+            <button onclick="generateNarrative()" id="btn-narrative-generate" class="btn btn-primary btn-sm">
+              Tạo Nhận Định AI
             </button>
           `;
           if (NARRATIVE_STATE.error) {
             alertEl.innerHTML = `
-              <div class="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-800 flex items-start space-x-3">
-                <span class="text-base">❌</span>
+              <div class="p-4 rounded-lg text-xs flex items-start space-x-3" style="background:var(--color-danger-bg); border:1px solid var(--color-danger-border); color:var(--color-danger);">
                 <div>
-                  <div class="font-bold text-red-900 mb-1">Không thể tạo nhận định AI.</div>
+                  <div class="font-bold mb-1">Không thể tạo nhận định AI.</div>
                   <p class="leading-relaxed">${escapeHtml(NARRATIVE_STATE.error)}</p>
                 </div>
               </div>
             `;
           } else {
             alertEl.innerHTML = `
-              <div class="p-4 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-800 flex items-start space-x-3">
-                <span class="text-base">💡</span>
+              <div class="p-4 rounded-lg text-xs flex items-start space-x-3" style="background:#EEF3FC; border:1px solid #D3E0F5; color:var(--color-accent-dark);">
                 <div>
-                  <div class="font-bold text-blue-900 mb-1">Dữ liệu canonical đủ để tạo nhận định.</div>
-                  <p class="leading-relaxed">Bấm <strong>"Tạo Nhận Định AI"</strong> để kích hoạt luồng: FactManifest SHA-256 ➔ GreenNode Insight Discovery ➔ Python Verifier ➔ Grounded Narrative Writer ➔ Deterministic Validator.</p>
+                  <div class="font-bold mb-1">Dữ liệu canonical đủ để tạo nhận định.</div>
+                  <p class="leading-relaxed">Bấm <strong>"Tạo Nhận Định AI"</strong> để kích hoạt luồng: FactManifest SHA-256 → GreenNode Insight Discovery → Python Verifier → Grounded Narrative Writer → Deterministic Validator.</p>
                 </div>
               </div>
             `;
           }
           if (telemetryEl) telemetryEl.classList.add('hidden');
+          if (genBtn) { genBtn.disabled = true; genBtn.className = 'btn btn-secondary btn-lg w-full md:w-2/3'; }
           break;
 
         case 'GENERATING':
-          badgeEl.className = 'text-xs bg-purple-100 text-purple-800 font-bold px-2.5 py-0.5 rounded animate-pulse border border-purple-200';
-          badgeEl.innerText = '🤖 AI Đang Phân Tích...';
+          badgeEl.className = 'chip chip-info';
+          badgeEl.innerText = 'AI đang phân tích...';
           actionsEl.innerHTML = `
-            <button disabled class="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg text-xs font-bold cursor-not-allowed flex items-center space-x-1.5 animate-pulse border border-purple-200">
-              <span>⏳ Đang Tạo Nhận Định...</span>
-            </button>
+            <button disabled class="btn btn-secondary btn-sm">Đang tạo nhận định...</button>
           `;
           alertEl.innerHTML = `
-            <div class="p-4 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-900 flex items-start space-x-3 animate-pulse">
-              <span class="text-base">⏳</span>
+            <div class="p-4 rounded-lg text-xs flex items-start space-x-3" style="background:#EEF3FC; border:1px solid #D3E0F5; color:var(--color-accent-dark);">
               <div>
                 <div class="font-bold mb-1">AI đang tổng hợp dữ liệu đã xác nhận và xây dựng nhận định...</div>
-                <p class="leading-relaxed">Đang chạy: Đóng gói FactManifest ➔ GLM-5.2 Insight Discovery ➔ Đối soát công thức toán độc lập bằng Python ➔ Soạn thảo văn bản Grounded Narrative ➔ Kiểm định tính toàn vẹn MB07.</p>
+                <p class="leading-relaxed">Đang chạy: Đóng gói FactManifest → GLM-5.2 Insight Discovery → Đối soát công thức toán độc lập bằng Python → Soạn thảo văn bản Grounded Narrative → Kiểm định tính toàn vẹn MB07.</p>
               </div>
             </div>
           `;
           if (telemetryEl) telemetryEl.classList.add('hidden');
+          if (genBtn) { genBtn.disabled = true; genBtn.className = 'btn btn-secondary btn-lg w-full md:w-2/3'; }
           break;
 
         case 'DRAFT':
-          badgeEl.className = 'text-xs bg-amber-100 text-amber-800 font-bold px-2.5 py-0.5 rounded border border-amber-300';
+          badgeEl.className = 'chip chip-warning';
           badgeEl.innerText = 'AI Draft — Chờ RM xác nhận';
           actionsEl.innerHTML = `
-            <button onclick="acceptNarrative()" id="btn-narrative-accept" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold shadow flex items-center space-x-1.5 transition">
-              <span>✔️ RM Phê Duyệt Toàn Bộ Bản Thảo</span>
-            </button>
-            <button onclick="generateNarrative()" id="btn-narrative-regenerate" class="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-sm transition flex items-center space-x-1">
-              <span>🔄 Tạo Lại</span>
-            </button>
+            <button onclick="acceptNarrative()" id="btn-narrative-accept" class="btn btn-success btn-sm">RM Phê Duyệt Toàn Bộ Bản Thảo</button>
+            <button onclick="generateNarrative()" id="btn-narrative-regenerate" class="btn btn-secondary btn-sm">Tạo Lại</button>
           `;
           alertEl.innerHTML = `
-            <div class="p-4 bg-amber-50/70 border border-amber-300 rounded-xl text-xs text-amber-900 flex items-start justify-between gap-3">
-              <div class="flex items-start space-x-3">
-                <span class="text-base">📋</span>
-                <div>
-                  <div class="font-bold mb-1">Bản thảo AI đã tạo thành công — Đang ở trạng thái Draft chờ RM thẩm định.</div>
-                  <p class="leading-relaxed text-amber-800">Bản thảo chưa được ghi nhận vào Tờ trình chính thức. RM có thể kiểm tra từng đoạn văn bản, bấm <strong>"✏️ RM Chỉnh sửa"</strong> để hiệu chỉnh và tái thẩm định, hoặc bấm <strong>"✔️ RM Phê Duyệt Toàn Bộ"</strong> để khóa số liệu và gắn kết vào Tờ trình MB07.</p>
-                </div>
+            <div class="p-4 rounded-lg text-xs flex items-start justify-between gap-3" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border); color:var(--color-warning);">
+              <div>
+                <div class="font-bold mb-1">Bản thảo AI đã tạo thành công — đang ở trạng thái Draft chờ RM thẩm định.</div>
+                <p class="leading-relaxed">Bản thảo chưa được ghi nhận vào Tờ trình chính thức. RM có thể kiểm tra từng đoạn văn bản, bấm <strong>"RM Chỉnh sửa"</strong> để hiệu chỉnh và tái thẩm định, hoặc bấm <strong>"RM Phê Duyệt Toàn Bộ"</strong> để khóa số liệu và gắn kết vào Tờ trình MB07.</p>
               </div>
             </div>
           `;
+          if (genBtn) { genBtn.disabled = true; genBtn.className = 'btn btn-secondary btn-lg w-full md:w-2/3'; genBtn.title = 'Cần RM phê duyệt toàn bộ bản thảo trước khi xuất bản'; }
           if (telemetryEl) {
             telemetryEl.classList.remove('hidden');
             const modelEl = document.getElementById('narrative-model-label');
@@ -3189,25 +3400,21 @@ HTML_PAGE = """<!DOCTYPE html>
           break;
 
         case 'ACCEPTED':
-          badgeEl.className = 'text-xs bg-emerald-100 text-emerald-800 font-bold px-2.5 py-0.5 rounded border border-emerald-300';
+          badgeEl.className = 'chip chip-success';
           badgeEl.innerText = '✓ Đã được RM xác nhận';
           actionsEl.innerHTML = `
-            <span class="text-xs text-emerald-700 font-bold bg-emerald-50 px-3 py-1.5 rounded-lg border border-emerald-200 flex items-center space-x-1.5">
-              <span>✓ Đã được RM xác nhận</span>
-            </span>
-            <button onclick="generateNarrative()" id="btn-narrative-regenerate" class="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-xs font-semibold shadow-sm transition flex items-center space-x-1">
-              <span>🔄 Tạo Lại Bản Thảo</span>
-            </button>
+            <span class="chip chip-success">✓ Đã được RM xác nhận</span>
+            <button onclick="generateNarrative()" id="btn-narrative-regenerate" class="btn btn-secondary btn-sm">Tạo Lại Bản Thảo</button>
           `;
           alertEl.innerHTML = `
-            <div class="p-4 bg-emerald-50 border border-emerald-300 rounded-xl text-xs text-emerald-900 flex items-start space-x-3">
-              <span class="text-base">✅</span>
+            <div class="p-4 rounded-lg text-xs flex items-start space-x-3" style="background:var(--color-success-bg); border:1px solid var(--color-success-border); color:var(--color-success);">
               <div>
                 <div class="font-bold mb-1">Toàn bộ nhận định đã được RM xác nhận cho Tờ trình MB07.</div>
-                <p class="leading-relaxed text-emerald-800">Các đoạn văn bản đã được gắn kết chính thức vào Tờ trình tín dụng. Bấm <strong>"🚀 BẮT ĐẦU TỔNG HỢP & XUẤT BẢN TỜ TRÌNH MB07 (.DOCX)"</strong> phía dưới để tải văn bản Word hoàn chỉnh.</p>
+                <p class="leading-relaxed">Các đoạn văn bản đã được gắn kết chính thức vào Tờ trình tín dụng. Bấm <strong>"Xuất Tờ Trình MB07"</strong> phía dưới để tải văn bản Word hoàn chỉnh.</p>
               </div>
             </div>
           `;
+          if (genBtn) { genBtn.disabled = false; genBtn.className = 'btn btn-primary btn-lg w-full md:w-2/3'; genBtn.title = ''; }
           if (telemetryEl) {
             telemetryEl.classList.remove('hidden');
             const modelEl = document.getElementById('narrative-model-label');
@@ -3231,20 +3438,20 @@ HTML_PAGE = """<!DOCTYPE html>
           break;
       }
 
+      updateSidebarProgress();
+
       if (NARRATIVE_STATE.blocks.length === 0) {
         if (state === 'GENERATING') {
           containerEl.innerHTML = `
-            <div class="p-12 text-center text-slate-400 space-y-3 bg-slate-50 rounded-xl border border-dashed border-slate-300">
-              <div class="text-3xl animate-spin inline-block">⚙️</div>
-              <div class="text-xs font-semibold text-slate-600">Đang tổng hợp các chỉ tiêu tài chính và đối soát văn bản...</div>
+            <div class="p-10 text-center space-y-2 rounded-lg" style="background:var(--color-bg); border:1px dashed var(--color-border-strong); color:var(--color-text-muted);">
+              <div class="text-xs font-semibold">Đang tổng hợp các chỉ tiêu tài chính và đối soát văn bản...</div>
             </div>
           `;
         } else {
           containerEl.innerHTML = `
-            <div class="p-10 text-center text-slate-400 space-y-3 bg-slate-50 rounded-xl border border-dashed border-slate-300">
-              <div class="text-3xl">📝</div>
-              <div class="text-sm font-semibold text-slate-700">Chưa có bản thảo nhận định tín dụng nào cho hồ sơ này</div>
-              <p class="text-xs text-slate-500 max-w-md mx-auto">Nhận định tín dụng MB07 sẽ được tự động soạn thảo dựa trên 100% dữ liệu đã xác nhận và các chỉ số tài chính đã được Python kiểm chứng.</p>
+            <div class="p-10 text-center space-y-2 rounded-lg" style="background:var(--color-bg); border:1px dashed var(--color-border-strong);">
+              <div class="text-sm font-semibold" style="color:var(--color-text);">Chưa có bản thảo nhận định tín dụng nào cho hồ sơ này</div>
+              <p class="text-xs max-w-md mx-auto" style="color:var(--color-text-muted);">Nhận định tín dụng MB07 sẽ được tự động soạn thảo dựa trên 100% dữ liệu đã xác nhận và các chỉ số tài chính đã được Python kiểm chứng.</p>
             </div>
           `;
         }
@@ -3265,40 +3472,77 @@ HTML_PAGE = """<!DOCTYPE html>
 
         let statusTag = '';
         if (isAccepted) {
-          statusTag = '<span class="text-xs text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">✓ Đã được RM xác nhận</span>';
+          statusTag = '<span class="chip chip-success">Đã được RM xác nhận</span>';
         } else if (wasEdited) {
-          statusTag = '<span class="text-[10px] bg-blue-100 text-blue-800 font-bold px-2 py-0.5 rounded border border-blue-300">✏️ RM Đã Hiệu Chỉnh</span>';
+          statusTag = '<span class="chip chip-info">RM đã hiệu chỉnh</span>';
         } else {
-          statusTag = '<span class="text-[10px] bg-amber-100 text-amber-800 font-bold px-2 py-0.5 rounded border border-amber-300">AI Draft — Chờ RM xác nhận</span>';
+          statusTag = '<span class="chip chip-warning">AI Draft</span>';
         }
 
-        const factsTagsHtml = factsUsed.slice(0, 3).map(f => `<span class="bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-mono text-[10px]">Fact: ${escapeHtml(f)}</span>`).join(' ');
-        const insightsTagsHtml = insightsUsed.slice(0, 2).map(i => `<span class="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded font-mono text-[10px]">Insight: ${escapeHtml(i)}</span>`).join(' ');
+        const factsTagsHtml = factsUsed.slice(0, 3).map(f => `<span class="chip chip-neutral font-mono">${escapeHtml(f)}</span>`).join(' ');
+        const insightsTagsHtml = insightsUsed.slice(0, 2).map(i => `<span class="chip chip-info font-mono">${escapeHtml(i)}</span>`).join(' ');
 
         html += `
-          <div class="p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2.5 transition hover:border-slate-300" id="${blockId}">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center space-x-2">
-                <span class="text-sm font-bold text-slate-900">${escapeHtml(title)}</span>
-                <span class="text-[10px] bg-indigo-50 text-indigo-700 font-bold px-1.5 py-0.5 rounded border border-indigo-200">Grounded AI</span>
-              </div>
-              <div>${statusTag}</div>
+          <div class="p-4 rounded-lg border space-y-2.5" id="${blockId}" style="border-color:var(--color-border); background:var(--color-bg);">
+            <div class="flex items-center justify-between gap-2">
+              <span class="text-sm font-semibold text-wrap-safe" style="color:var(--color-text);">${escapeHtml(title)}</span>
+              <div class="flex-none">${statusTag}</div>
             </div>
-            <p class="text-xs text-slate-700 bg-white p-3.5 rounded-lg border border-slate-200 leading-relaxed whitespace-pre-line" id="${textId}">${escapeHtml(text)}</p>
-            <div class="flex items-center justify-between text-[11px] text-slate-500 pt-1 border-t border-slate-100">
+            <p class="text-xs bg-white p-3.5 rounded-md border leading-relaxed text-wrap-safe" style="border-color:var(--color-border); color:var(--color-text); white-space:pre-line;" id="${textId}">${escapeHtml(text)}</p>
+            <div class="flex items-center justify-between text-[11px] pt-1 border-t gap-2" style="border-color:var(--color-border); color:var(--color-text-faint);">
               <div class="flex flex-wrap gap-1.5 items-center">
                 ${factsTagsHtml}
                 ${insightsTagsHtml}
               </div>
-              <button onclick="openEditNarrativeModal('${binding}')" class="text-blue-700 hover:text-blue-900 hover:underline font-semibold flex items-center space-x-1">
-                <span>✏️ RM Chỉnh sửa</span>
-              </button>
+              <button onclick="openEditNarrativeModal('${binding}')" class="btn btn-ghost btn-sm flex-none">Chỉnh sửa</button>
             </div>
           </div>
         `;
       });
 
       containerEl.innerHTML = html;
+    }
+
+    /* Sidebar progress indicators (visual only — never changes any request/response
+       behavior). Semantics:
+         ✓ done   — a real, already-tracked completion signal for that step.
+         ●  active — the step currently being viewed (always shown regardless of
+                     whether its own completion signal is true).
+         ○  pending — no reliable completion signal yet; NEVER shown as done just
+                     because unrelated data (e.g. other steps' data) happens to exist. */
+    function updateSidebarProgress() {
+      VISITED_TABS.add(CURRENT_ACTIVE_TAB);
+      const allDocsConfirmed = Object.values(DOC_STATES).every(s => s.state === 'RM_CONFIRMED');
+
+      const done = {
+        'tab-dashboard': VISITED_TABS.has('tab-dashboard'),
+        'tab-upload': allDocsConfirmed,
+        'tab-review': SECTION_A_SAVED && SECTION_B_SAVED,
+        'tab-insights': VISITED_TABS.has('tab-insights'),
+        'tab-narrative': NARRATIVE_STATE.status === 'ACCEPTED',
+        'tab-committee': !!window.__MB07_EXPORTED__,
+      };
+
+      Object.keys(done).forEach(tabId => {
+        const nav = document.getElementById('nav-' + tabId);
+        if (!nav) return;
+        const stepEl = nav.querySelector('.nav-item-step');
+        if (!stepEl) return;
+
+        stepEl.classList.remove('is-done', 'is-active', 'is-pending');
+        if (tabId === CURRENT_ACTIVE_TAB) {
+          stepEl.classList.add('is-active');
+          stepEl.textContent = '●';
+        } else if (done[tabId]) {
+          stepEl.classList.add('is-done');
+          stepEl.textContent = '✓';
+        } else {
+          stepEl.classList.add('is-pending');
+          stepEl.textContent = '○';
+        }
+      });
+
+      updateTopbarPrimaryCTA();
     }
 
     // Backwards-compatibility aliases
@@ -3309,15 +3553,120 @@ HTML_PAGE = """<!DOCTYPE html>
       openEditNarrativeModal(target);
     }
 
+    function renderDocumentQAPanel(qa) {
+      const panel = document.getElementById('qa-result-panel');
+      if (!panel) return;
+      if (!qa) { panel.classList.add('hidden'); panel.innerHTML = ''; return; }
+
+      const detChecks = qa.deterministic_checks || {};
+      const visChecks = qa.visual_checks || {};
+      const issues = qa.issues || [];
+
+      const renderCheckRow = (label, value) => {
+        const ok = value === 'PASS';
+        const isFail = value === 'FAIL';
+        const icon = ok ? '✓' : (isFail ? '✕' : '·');
+        const color = ok ? 'var(--color-success)' : (isFail ? 'var(--color-danger)' : 'var(--color-text-faint)');
+        return `<div class="flex items-center gap-1.5 text-xs"><span style="color:${color}; font-weight:700;">${icon}</span><span style="color:var(--color-text-muted);">${escapeHtml(label)}</span></div>`;
+      };
+
+      const detLabels = {
+        docx_opens: 'Mở tệp DOCX', package_integrity: 'Toàn vẹn gói tin', no_corruption_detected: 'Không lỗi hỏng',
+        authoritative_template_located: 'Template gốc', section_count_preserved: 'Số lượng Section',
+        section_orientation_margins_preserved: 'Lề / hướng trang', table_count_structurally_compatible: 'Bảng biểu',
+        header_footer_relationships_present: 'Header/Footer', image_logo_relationships_preserved: 'Logo',
+      };
+      const visLabels = {
+        logo: 'Logo', header_footer: 'Header/Footer', font_consistency: 'Font chữ',
+        table_layout: 'Bố cục bảng', spacing_alignment: 'Căn chỉnh/Khoảng cách', overall_visual_fidelity: 'Tổng thể',
+      };
+
+      const detHtml = Object.entries(detChecks).map(([k, v]) => renderCheckRow(detLabels[k] || k, v)).join('');
+      const visEntries = Object.entries(visChecks).filter(([k]) => k !== 'overall_visual_fidelity');
+      const visHtml = visEntries.map(([k, v]) => renderCheckRow(visLabels[k] || k, v)).join('');
+
+      let statusChip, statusNote;
+      if (qa.status === 'PASS') {
+        statusChip = '<span class="chip chip-success">PASS</span>';
+        statusNote = 'Tài liệu đạt chuẩn định dạng MB07.';
+      } else if (qa.status === 'VISUAL_QA_UNAVAILABLE') {
+        statusChip = '<span class="chip chip-warning">VISUAL QA UNAVAILABLE</span>';
+        statusNote = 'Kiểm định cấu trúc đạt yêu cầu. Không thể xác minh định dạng hiển thị trong môi trường này.';
+      } else {
+        statusChip = '<span class="chip chip-danger">FAIL</span>';
+        statusNote = 'Tài liệu chưa đạt kiểm định định dạng MB07 — xuất bản bị chặn.';
+      }
+
+      const issuesHtml = (qa.status !== 'PASS' && issues.length > 0)
+        ? `<ul class="text-xs mt-2 space-y-1 list-disc list-inside text-wrap-safe" style="color:var(--color-danger);">${issues.slice(0, 8).map(i => `<li>${escapeHtml(String(i))}</li>`).join('')}</ul>`
+        : '';
+
+      panel.classList.remove('hidden');
+      panel.innerHTML = `
+        <div class="panel p-4 text-left">
+          <div class="flex items-center justify-between mb-2 gap-2">
+            <span class="section-title" style="font-size:13px;">Document QA</span>
+            ${statusChip}
+          </div>
+          <div class="text-xs mb-3" style="color:var(--color-text-muted);">${escapeHtml(statusNote)}</div>
+          <div class="grid grid-cols-2 gap-x-4 gap-y-1.5">
+            <div class="space-y-1">
+              <div class="text-[11px] font-semibold uppercase" style="color:var(--color-text-faint);">Deterministic</div>
+              ${detHtml || '<div class="text-xs" style="color:var(--color-text-faint);">—</div>'}
+            </div>
+            <div class="space-y-1">
+              <div class="text-[11px] font-semibold uppercase" style="color:var(--color-text-faint);">Visual QA</div>
+              ${visHtml || '<div class="text-xs" style="color:var(--color-text-faint);">Không khả dụng</div>'}
+            </div>
+          </div>
+          ${issuesHtml}
+        </div>
+      `;
+    }
+
+    /* Contextual top-bar primary CTA — depends solely on the active workflow step.
+       Never shows the export action as the dominant CTA on Steps 1-4 (that used to
+       compete with the real next-step action); it becomes the primary action again
+       only on the Narrative / Credit Committee steps. Export functionality itself
+       (generateDocx) is unchanged — this only controls which action the button
+       triggers and how it is labeled. */
+    const TOPBAR_CTA_STEPS = {
+      'tab-dashboard': { label: 'Tiếp tục → Không gian Tài liệu', next: 'tab-upload' },
+      'tab-upload': { label: 'Tiếp tục → Dữ liệu Đã Xác nhận', next: 'tab-review' },
+      'tab-review': { label: 'Tiếp tục → Thẩm định Tín dụng AI', next: 'tab-insights' },
+      'tab-insights': { label: 'Tiếp tục → Tờ trình / Narrative', next: 'tab-narrative' },
+    };
+
+    function updateTopbarPrimaryCTA() {
+      const btn = document.getElementById('btn-export-top');
+      if (!btn) return;
+      btn.classList.remove('hidden');
+      btn.className = 'btn btn-primary btn-sm';
+
+      if (CURRENT_ACTIVE_TAB === 'tab-narrative' || CURRENT_ACTIVE_TAB === 'tab-committee') {
+        btn.innerText = 'Xuất Tờ Trình MB07';
+        btn.onclick = generateDocx;
+        return;
+      }
+
+      const step = TOPBAR_CTA_STEPS[CURRENT_ACTIVE_TAB];
+      if (step) {
+        btn.innerText = step.label;
+        btn.onclick = () => switchTab(step.next);
+      }
+    }
+
     async function generateDocx() {
       const btnMain = document.getElementById('btn-generate-main');
       const btnTop = document.getElementById('btn-export-top');
-      if (btnMain) { btnMain.innerText = '⏳ Đang tổng hợp & xuất bản MB07...'; btnMain.disabled = true; }
-      if (btnTop) { btnTop.innerText = '⏳ Đang sinh...'; btnTop.disabled = true; }
+      if (btnMain) { btnMain.innerText = 'Đang tổng hợp & xuất bản MB07...'; btnMain.disabled = true; }
+      if (btnTop) { btnTop.innerText = 'Đang sinh...'; btnTop.disabled = true; }
 
       try {
         const res = await fetch('/api/generate_docx', { method: 'POST' });
         const data = await res.json();
+        renderDocumentQAPanel(data.qa_result || null);
+
         if (data.status === 'success') {
           switchTab('tab-narrative');
           const resBox = document.getElementById('export-result');
@@ -3326,19 +3675,44 @@ HTML_PAGE = """<!DOCTYPE html>
             document.getElementById('export-filename').innerText = `Tệp tin: ${data.filename}`;
             document.getElementById('export-download-link').href = data.download_url;
           }
-          alert(`🎉 Xuất Tờ Trình MB07 thành công: ${data.filename}! Bấm [TẢI FILE WORD VỀ MÁY] để mở.`);
+          window.__MB07_EXPORTED__ = true;
+          updateSidebarProgress();
+        } else if (data.status === 'qa_failed') {
+          switchTab('tab-narrative');
         } else {
-          alert('Lỗi: ' + data.message);
+          alert('Lỗi: ' + (data.message || 'Không thể xuất tờ trình.'));
         }
       } catch (err) {
         alert('Lỗi hệ thống: ' + err.message);
       } finally {
-        if (btnMain) { btnMain.innerText = '🚀 BẮT ĐẦU TỔNG HỢP & XUẤT BẢN TỜ TRÌNH MB07 (.DOCX)'; btnMain.disabled = false; }
-        if (btnTop) { btnTop.innerText = '⚡ Xuất Tờ Trình MB07 (.DOCX)'; btnTop.disabled = false; }
+        if (btnTop) { btnTop.disabled = false; }
+        if (btnMain) { btnMain.innerText = 'Xuất Tờ Trình MB07 (.DOCX)'; }
+        renderNarrativeUI();
+        updateTopbarPrimaryCTA();
+      }
+    }
+
+    /* Case-selector option labels come from the backend (CASES_DB) rather than being
+       hardcoded in the page, so they can never drift from the case's actual display
+       name — matches by option value (case id) and only updates existing options'
+       text, never invents new cases here (new cases are added by submitNewCase()). */
+    async function loadCaseList() {
+      try {
+        const res = await fetch('/api/cases');
+        const cases = await res.json();
+        const selector = document.getElementById('case-selector');
+        if (!selector || !Array.isArray(cases)) return;
+        cases.forEach(c => {
+          const opt = selector.querySelector(`option[value="${c.id}"]`);
+          if (opt && c.name) opt.innerText = c.name;
+        });
+      } catch (err) {
+        console.warn("Could not load case list:", err);
       }
     }
 
     window.onload = function() {
+      loadCaseList();
       loadCaseData();
       updateWorkspaceHeaderBadge();
     };
