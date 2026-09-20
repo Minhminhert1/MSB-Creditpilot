@@ -43,6 +43,7 @@ from msb_eb_copilot.src.narrative import (
 )
 from msb_eb_copilot.src.proposal_assembler import CreditProposalAssembler
 from msb_eb_copilot.src.document_formatter import DocumentFormatter
+from msb_eb_copilot.src.document_qa_agent import run_document_qa_gate, DocumentQAFailedError
 from msb_eb_copilot.src.section_a.review_session import SectionAReviewSession
 from msb_eb_copilot.src.section_a.validator import SectionAValidator
 from msb_eb_copilot.src.section_c import (
@@ -516,6 +517,12 @@ CASES_DB = {
 
 ACTIVE_CASE_ID = "PSD"
 
+# Populated by execute_generation_pipeline() with the structured Document QA result
+# (see msb_eb_copilot/src/document_qa_agent.py) of the most recent export attempt, so the
+# HTTP handler can surface it to the RM without changing execute_generation_pipeline's
+# existing str-return contract (relied on by scripts/verify_mb07_generation.py and other callers).
+LAST_DOCUMENT_QA_RESULT: Optional[Dict[str, Any]] = None
+
 def get_active_case():
     global ACTIVE_CASE_ID
     return CASES_DB.get(ACTIVE_CASE_ID, CASES_DB["PSD"])
@@ -834,6 +841,12 @@ def execute_generation_pipeline(case_id=None):
     )
 
     DocumentFormatter.polish(final_path, keep_highlights=False)
+
+    # Final QA gate: deterministic DOCX checks + GreenNode visual QA (AI is reviewer only,
+    # never mutates the DOCX). Raises DocumentQAFailedError to block export on FAIL.
+    global LAST_DOCUMENT_QA_RESULT
+    LAST_DOCUMENT_QA_RESULT = run_document_qa_gate(final_path)
+
     return output_doc_path
 
 
@@ -5595,8 +5608,17 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({
                     "status": "success",
                     "filename": fname,
-                    "download_url": f"/download/{fname}"
+                    "download_url": f"/download/{fname}",
+                    "qa_result": LAST_DOCUMENT_QA_RESULT
                 })
+            except DocumentQAFailedError as e:
+                # Document QA layer blocked export: AI/deterministic reviewer found fidelity
+                # issues. Do NOT export; return the explicit QA issues instead.
+                self._send_json({
+                    "status": "qa_failed",
+                    "message": "Document QA thất bại: tài liệu vi phạm kiểm định định dạng MB07. Xuất tài liệu bị chặn.",
+                    "qa_result": e.qa_result
+                }, status_code=422)
             except Exception as e:
                 import traceback
                 traceback.print_exc()
