@@ -20,7 +20,7 @@ import concurrent.futures
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from msb_eb_copilot.src.ai_client import AIAssistantClient
 
@@ -41,10 +41,86 @@ class FinancialEvidenceField(BaseModel):
 
 
 class FinancialUnitInfo(BaseModel):
-    """Grounded unit information at page or document level."""
+    """Grounded unit information at page or document level.
+
+    Kept STRICT on purpose: unit_raw/evidence/page are all mandatory. A
+    FinancialUnitInfo instance is either fully grounded provenance, or it simply
+    does not exist (see _normalize_unit_dict_or_raise / FinancialDocumentExtraction's
+    model_validator(mode="before"), which normalizes raw LLM output BEFORE this
+    model's own strict validation runs, so a half-populated record from the LLM
+    never reaches this class at all -- it is either dropped as absence or
+    rejected as an explicit provenance error upstream)."""
     unit_raw: str = Field(..., description="Raw unit text, e.g. 'VND', 'triệu đồng'")
     evidence: str = Field(..., description="Verbatim snippet where unit appears")
     page: int = Field(..., description="Page number where unit evidence was found")
+
+
+def _is_blank_unit_value(value: Any) -> bool:
+    """None or a whitespace-only string is treated as blank/absent. Any other
+    value (including a populated string, or a non-string like an int page
+    number) is NOT blank."""
+    if value is None:
+        return True
+    if isinstance(value, str) and value.strip() == "":
+        return True
+    return False
+
+
+def _normalize_unit_dict_or_raise(raw_unit: Any, *, context: str) -> Any:
+    """Normalizes ONE raw unit-info record (a page_units entry or document_unit)
+    BEFORE FinancialUnitInfo's own strict validation runs.
+
+    Policy (Zero Silent Fallback -- never fabricate, never silently accept a
+    half-populated record):
+    - None -> None (already absent, nothing to do).
+    - Already a validated FinancialUnitInfo instance (e.g. from
+      merge_financial_extractions, which builds these programmatically, not from
+      raw LLM JSON) -> returned unchanged; it can never be "partial" since
+      Pydantic already enforced its required fields when it was built.
+    - Not a dict (and not None/a FinancialUnitInfo) -> returned unchanged; this is
+      a malformed shape unrelated to null-handling, so Pydantic's own field type
+      validation reports it naturally.
+    - unit_raw AND evidence both blank (None or whitespace-only) -> effectively
+      empty/no evidence at all -> None (dropped), REGARDLESS of whether `page`
+      happens to be populated -- `page` alone carries no unit provenance, and
+      this is exactly the confirmed production shape (e.g. {"unit_raw": null,
+      "evidence": null, "page": 21}).
+    - unit_raw non-blank AND evidence non-blank AND page non-blank -> fully
+      present -> returned unchanged (no fabrication, no mutation).
+    - Any other combination (exactly one of unit_raw/evidence present, or both
+      present but page missing) -> partially populated -> raise ValueError
+      (surfaces as a pydantic ValidationError from the caller's
+      model_validator, and from there as the existing FinancialChunkExtractionError
+      at the GreenNode chunk-extraction call site) -- provenance is incomplete
+      and must fail loudly, never be silently accepted.
+    """
+    if raw_unit is None:
+        return None
+    if isinstance(raw_unit, FinancialUnitInfo):
+        return raw_unit
+    if not isinstance(raw_unit, dict):
+        return raw_unit
+
+    unit_raw = raw_unit.get("unit_raw")
+    evidence = raw_unit.get("evidence")
+    page = raw_unit.get("page")
+
+    unit_raw_blank = _is_blank_unit_value(unit_raw)
+    evidence_blank = _is_blank_unit_value(evidence)
+
+    if unit_raw_blank and evidence_blank:
+        return None
+
+    page_blank = _is_blank_unit_value(page)
+    if (not unit_raw_blank) and (not evidence_blank) and (not page_blank):
+        return raw_unit
+
+    raise ValueError(
+        f"{context}: bản ghi đơn vị tính (unit) chỉ có dữ liệu bằng chứng một phần "
+        f"(unit_raw={unit_raw!r}, evidence={evidence!r}, page={page!r}). Một bản ghi "
+        f"unit phải đầy đủ cả 3 trường (unit_raw, evidence, page) hoặc hoàn toàn "
+        f"vắng mặt -- không được chấp nhận trạng thái nửa vời."
+    )
 
 
 class FinancialPeriodExtraction(BaseModel):
@@ -80,6 +156,40 @@ class FinancialDocumentExtraction(BaseModel):
     periods: List[FinancialPeriodExtraction] = Field(default_factory=list)
     page_units: Dict[int, FinancialUnitInfo] = Field(default_factory=dict, description="Grounded units per page")
     document_unit: Optional[FinancialUnitInfo] = Field(None, description="Document-wide fallback unit")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_units_before_validation(cls, data: Any) -> Any:
+        """Deterministic pre-validation normalization for page_units/document_unit
+        (see _normalize_unit_dict_or_raise for the exact policy). Runs on EVERY
+        construction path (model_validate() from raw LLM JSON, direct keyword
+        construction from merge_financial_extractions, the default empty
+        constructor, ...) since it lives on the model itself rather than only in
+        the GreenNode chunk pre-processing step -- so the invariant "a unit record
+        is either fully present or fully absent" holds everywhere, not just for
+        one call site. Never fabricates a unit from another page/level; only
+        drops effectively-empty records or raises on partial ones."""
+        if not isinstance(data, dict):
+            return data
+
+        data = dict(data)  # never mutate the caller's original dict in place
+
+        if "document_unit" in data:
+            data["document_unit"] = _normalize_unit_dict_or_raise(
+                data["document_unit"], context="document_unit"
+            )
+
+        page_units = data.get("page_units")
+        if isinstance(page_units, dict):
+            normalized_page_units: Dict[Any, Any] = {}
+            for page_key, unit_val in page_units.items():
+                normalized = _normalize_unit_dict_or_raise(unit_val, context=f"page_units[{page_key}]")
+                if normalized is not None:
+                    normalized_page_units[page_key] = normalized
+                # else: effectively empty -- entry dropped entirely, not fabricated, not kept.
+            data["page_units"] = normalized_page_units
+
+        return data
 
 
 # ==============================================================================
@@ -456,6 +566,17 @@ QUY TẮC CỐT LÕI (BẮT BUỘC TUÂN THỦ 100%):
 5. XÁC ĐỊNH ĐƠN VỊ TÍNH (UNIT) GẮN LIỀN VỚI TỪNG TRANG:
    - Tìm câu văn ghi đơn vị tính (ví dụ: 'Đơn vị tính: VND', 'Đơn vị tính: triệu đồng').
    - Ghi nhận unit_raw và unit_evidence.
+   - QUY TẮC BẮT BUỘC VỀ TÍNH TOÀN VẸN CỦA BẢN GHI UNIT (page_units/document_unit):
+     * Nếu một trang KHÔNG có câu văn ghi đơn vị tính tường minh (không có bằng chứng unit),
+       BẮT BUỘC bỏ qua (OMIT) hẳn trang đó khỏi "page_units" -- KHÔNG được thêm entry với
+       "unit_raw": null, "evidence": null cho trang đó.
+     * TUYỆT ĐỐI KHÔNG xuất ra dạng {"unit_raw": null, "evidence": null, "page": <số trang>}
+       trong "page_units" hay "document_unit".
+     * Nếu KHÔNG tìm thấy đơn vị tính cấp tài liệu (document-level), trả về
+       "document_unit": null (không tạo object nửa vời).
+     * Nếu trả về một object unit (cho "document_unit" hoặc bất kỳ entry nào trong
+       "page_units"), object đó BẮT BUỘC phải có đủ CẢ BA trường unit_raw, evidence,
+       và page đều khác null -- không được để một phần null.
 6. PHÂN TÁCH RÕ RÀNG TỪNG NĂM / KỲ KẾ TOÁN (PERIOD):
    - Xác định rõ cột số liệu thuộc năm nào (ví dụ: '2025', '2024'). Không được tráo đổi thứ tự cột.
 7. ĐỊNH DẠNG ĐẦU RA:
