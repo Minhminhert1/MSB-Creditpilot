@@ -35,12 +35,14 @@ from msb_eb_copilot.src.ingestion.pdf_ocr import (
     BaseOCREngine,
     QwenVisionOCREngine,
     OCRDocumentResult,
+    OCRFailedPageInfo,
     OCRTimeoutError,
     OCRServiceError,
     OCRIngestionError,
     OCRRenderError,
     OCRNoTextError,
     OCRPageCountError,
+    OCR_UNREADABLE_PAGE_MARKER,
 )
 
 
@@ -66,6 +68,11 @@ class DocumentIngestionResult(BaseModel):
         default=None,
         description="Tên định danh của engine trích xuất thành công ('pypdf', OCR provider, hoặc 'pypdf+{ocr_provider}')"
     )
+    failed_pages: List[OCRFailedPageInfo] = Field(
+        default_factory=list,
+        description="Các trang OCR được dung thứ là không đọc được sau khi hết mọi lần thử lại "
+                    "-- CHỈ khác rỗng khi caller truyền max_failed_pages (hiện tại: chỉ luồng OCR tài chính)."
+    )
 
 
 class DocumentIngestionRouter:
@@ -81,6 +88,7 @@ class DocumentIngestionRouter:
         dpi: int = DEFAULT_DPI,
         max_workers: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, int], None]] = None,
+        max_failed_pages: Optional[int] = None,
     ) -> DocumentIngestionResult:
         """Nhập liệu tệp PDF với chính sách ưu tiên digital text, chỉ fallback sang OCR khi cần thiết.
 
@@ -92,6 +100,12 @@ class DocumentIngestionRouter:
             progress_callback: Tùy chọn, chuyển tiếp thẳng xuống PDFOCRIngestor khi cần
                 OCR fallback -- gọi lại (page_num, completed_count, total_pages) sau mỗi
                 trang OCR hoàn tất. Không tác động tới đường đi digital-only (không OCR).
+            max_failed_pages: Tùy chọn (mặc định None -- giữ NGUYÊN hành vi hiện tại, bất
+                kỳ trang lỗi nào cũng làm hỏng toàn bộ). Khi được truyền (hiện tại: CHỈ
+                luồng OCR tài chính), bật chế độ dung thứ trang lỗi -- xem
+                PDFOCRIngestor.ocr_pages_parallel/extract_document để biết chi tiết.
+                Không tác động tới đường đi digital-only, và không thay đổi hành vi
+                legal/business/CIC (các luồng đó không truyền tham số này).
 
         Returns:
             DocumentIngestionResult chứa tagged_text và metadata nguồn gốc.
@@ -129,13 +143,15 @@ class DocumentIngestionRouter:
                     dpi=dpi,
                     max_workers=max_workers,
                     progress_callback=progress_callback,
+                    max_failed_pages=max_failed_pages,
                 )
                 return DocumentIngestionResult(
                     tagged_text=ocr_result.tagged_text,
                     mode="ocr",
                     page_count=ocr_result.page_count,
                     fallback_reason=type(exc).__name__,
-                    provider=ocr_result.provider
+                    provider=ocr_result.provider,
+                    failed_pages=ocr_result.failed_pages,
                 )
 
             # Đánh giá chi tiết từng trang vật lý (Page-level evaluation)
@@ -164,13 +180,15 @@ class DocumentIngestionRouter:
                     dpi=dpi,
                     max_workers=max_workers,
                     progress_callback=progress_callback,
+                    max_failed_pages=max_failed_pages,
                 )
                 return DocumentIngestionResult(
                     tagged_text=ocr_result.tagged_text,
                     mode="ocr",
                     page_count=ocr_result.page_count,
                     fallback_reason=type(exc).__name__,
-                    provider=ocr_result.provider
+                    provider=ocr_result.provider,
+                    failed_pages=ocr_result.failed_pages,
                 )
 
             # TRƯỜNG HỢP B: Hỗn hợp (HYBRID: một số trang digital, một số trang cần OCR)
@@ -191,6 +209,7 @@ class DocumentIngestionRouter:
                 raise OCRRenderError(f"Không thể mở tài liệu bằng PDFium: {str(render_exc)}") from render_exc
 
             # Thực hiện OCR song song có giới hạn CHỈ cho các trang trong ocr_page_indices
+            failed_pages: List[OCRFailedPageInfo] = []
             ocr_pages_result = PDFOCRIngestor.ocr_pages_parallel(
                 pdf_path=pdf_path,
                 page_nums=ocr_page_indices,
@@ -198,16 +217,23 @@ class DocumentIngestionRouter:
                 dpi=dpi,
                 max_workers=max_workers,
                 progress_callback=progress_callback,
+                max_failed_pages=max_failed_pages,
+                failed_pages_out=failed_pages,
             )
             ocr_pages = {p_num: res.text for p_num, res in ocr_pages_result.items()}
+            failed_page_num_set = {fp.page for fp in failed_pages}
 
-            # Bất biến số trang: Lắp ráp tất định theo đúng thứ tự trang vật lý 1..N
+            # Bất biến số trang: Lắp ráp tất định theo đúng thứ tự trang vật lý 1..N.
+            # Trang lỗi (dung thứ) dùng marker tất định OCR_UNREADABLE_PAGE_MARKER --
+            # TUYỆT ĐỐI KHÔNG bịa đặt nội dung, KHÔNG bỏ qua thẻ [PAGE X].
             assembled_blocks: List[str] = []
             for idx in range(1, total_pages + 1):
                 if idx in digital_pages:
                     assembled_blocks.append(f"[PAGE {idx}]\n{digital_pages[idx]}")
                 elif idx in ocr_pages:
                     assembled_blocks.append(f"[PAGE {idx}]\n{ocr_pages[idx]}")
+                elif idx in failed_page_num_set:
+                    assembled_blocks.append(f"[PAGE {idx}]\n{OCR_UNREADABLE_PAGE_MARKER}")
                 else:
                     raise OCRPageCountError(f"Thiếu nội dung trang {idx} trong quá trình tổng hợp hybrid.")
 
@@ -217,7 +243,8 @@ class DocumentIngestionRouter:
                 mode="hybrid",
                 page_count=total_pages,
                 fallback_reason=type(exc).__name__,
-                provider=f"pypdf+{ocr_provider_name}"
+                provider=f"pypdf+{ocr_provider_name}",
+                failed_pages=failed_pages,
             )
 
         except (PDFNoTextError, PDFFileNotFoundError, PDFEncryptedError, PDFIngestionError):

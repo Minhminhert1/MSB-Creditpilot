@@ -47,7 +47,10 @@ from msb_eb_copilot.src.extraction.financial_extraction import (
     FINANCIAL_SOURCE_FACT_FIELDS,
     normalize_financial_extraction_raw_dict,
     is_note_disclosure_cogs,
+    get_financial_ocr_max_failed_pages,
+    DEFAULT_FINANCIAL_OCR_MAX_FAILED_PAGES,
 )
+from msb_eb_copilot.src.ingestion.pdf_ocr import OCR_UNREADABLE_PAGE_MARKER
 
 
 class MockAIClient:
@@ -429,6 +432,46 @@ def test_grounding_page_numbers_preserve_physical_pages():
     assert errs == []
 
 
+def test_c_k_ocr_unreadable_page_contributes_no_grounding_evidence():
+    """C/K: a page marked with OCR_UNREADABLE_PAGE_MARKER (degraded OCR page)
+    contains no usable evidence. Even if a fact hallucinated a citation to that
+    page (which the prompt explicitly forbids), FinancialGroundingAuditor still
+    fails it closed -- proving no fabricated evidence can ever be accepted for
+    a failed page, independent of prompt compliance."""
+    tagged = build_tagged_text(3, content_fn=lambda idx: (
+        OCR_UNREADABLE_PAGE_MARKER if idx == 2
+        else "BÁO CÁO KẾT QUẢ HOẠT ĐỘNG KINH DOANH\nĐơn vị tính: VND\nDoanh thu thuần | 10 | 120.000.000.000"
+    ))
+    assert f"[PAGE 2]\n{OCR_UNREADABLE_PAGE_MARKER}" in tagged
+
+    hallucinated_field = FinancialEvidenceField(
+        value_raw="999.000.000.000",
+        semantic_label="Doanh thu thuần",
+        accounting_code="10",
+        evidence="Doanh thu thuần | 10 | 999.000.000.000",
+        page=2,  # the OCR_UNREADABLE page -- this evidence can never actually be there
+    )
+    errs = FinancialGroundingAuditor.audit_field("net_revenue", hallucinated_field, tagged, 3)
+    assert any("Evidence not found on declared Page 2" in e for e in errs)
+
+    # Sanity: a legitimately-grounded fact on the readable page 1 still passes.
+    real_field = FinancialEvidenceField(
+        value_raw="120.000.000.000",
+        semantic_label="Doanh thu thuần",
+        accounting_code="10",
+        evidence="Doanh thu thuần | 10 | 120.000.000.000",
+        page=1,
+    )
+    assert FinancialGroundingAuditor.audit_field("net_revenue", real_field, tagged, 3) == []
+
+
+def test_k_ocr_unreadable_marker_never_contains_alphanumeric_evidence_shape():
+    """K: sanity check that the marker text itself can never be mistaken for a
+    real evidence line (no digits, no accounting separators)."""
+    assert OCR_UNREADABLE_PAGE_MARKER == "[OCR_UNREADABLE]"
+    assert not any(ch.isdigit() for ch in OCR_UNREADABLE_PAGE_MARKER)
+
+
 def test_unit_merge_and_conflict_handling():
     u1 = FinancialUnitInfo(unit_raw="VND", evidence="Đơn vị tính: VND", page=1)
     u2 = FinancialUnitInfo(unit_raw="VND", evidence="Đơn vị tính: VND", page=6)
@@ -484,6 +527,26 @@ def test_pages_per_chunk_and_workers_configuration():
     assert get_financial_extraction_max_workers(configured=3) == 3
     assert get_financial_extraction_max_workers(configured=0) == 2
     assert get_financial_extraction_max_workers(configured=99) == 4
+
+
+def test_g_financial_ocr_max_failed_pages_configuration():
+    """G. FINANCIAL_OCR_MAX_FAILED_PAGES env var override works, with a safe
+    default of 2 and safe fallback for invalid/negative values."""
+    with patch.dict(os.environ, {}, clear=True):
+        assert get_financial_ocr_max_failed_pages() == DEFAULT_FINANCIAL_OCR_MAX_FAILED_PAGES == 2
+    with patch.dict(os.environ, {"FINANCIAL_OCR_MAX_FAILED_PAGES": "abc"}):
+        assert get_financial_ocr_max_failed_pages() == 2
+    with patch.dict(os.environ, {"FINANCIAL_OCR_MAX_FAILED_PAGES": "-1"}):
+        assert get_financial_ocr_max_failed_pages() == 2
+    with patch.dict(os.environ, {"FINANCIAL_OCR_MAX_FAILED_PAGES": "1"}):
+        assert get_financial_ocr_max_failed_pages() == 1
+    with patch.dict(os.environ, {"FINANCIAL_OCR_MAX_FAILED_PAGES": "0"}):
+        assert get_financial_ocr_max_failed_pages() == 0  # 0 is valid: tolerate zero failures
+    with patch.dict(os.environ, {"FINANCIAL_OCR_MAX_FAILED_PAGES": "5"}):
+        assert get_financial_ocr_max_failed_pages() == 5  # no upper clamp by design
+
+    assert get_financial_ocr_max_failed_pages(configured=1) == 1
+    assert get_financial_ocr_max_failed_pages(configured=0) == 0
 
 
 def test_bounded_concurrency_and_out_of_order_merge():

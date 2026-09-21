@@ -40,6 +40,9 @@ from msb_eb_copilot.src.ingestion.pdf_ocr import (
     OCRDocumentResult,
     OCRTimeoutError,
     OCRServiceError,
+    OCRFailedPageInfo,
+    OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES,
+    OCR_UNREADABLE_PAGE_MARKER,
 )
 from msb_eb_copilot.src.extraction.legal_extraction import (
     LegalDocumentExtractor,
@@ -400,3 +403,84 @@ def test_integration_b_scanned_router_to_legal_extractor():
         assert extraction.company_name.value == "CÔNG TY CỔ PHẦN CÔNG NGHỆ VÀ THƯƠNG MẠI SAO MAI"
         assert extraction.tax_code.value == "0312456789"
         assert extraction.legal_rep_name.value == "Đặng Quốc Hưng"  # Đã chuẩn hóa danh xưng
+
+
+# ==============================================================================
+# 3. FINANCIAL-ONLY PAGE-LEVEL DEGRADED OCR HANDLING (max_failed_pages)
+# ==============================================================================
+def test_i_failed_pages_metadata_propagates_from_ocr_result_to_document_result():
+    """I. failed_pages metadata reaches DocumentIngestionResult (all-scanned OCR path)."""
+    with patch("msb_eb_copilot.src.ingestion.pdf_text.PDFTextIngestor.extract_text_with_page_markers",
+               side_effect=PDFBlankPageError("Trang 1 không có text")):
+        with patch("msb_eb_copilot.src.ingestion.pdf_ocr.PDFOCRIngestor.extract_document") as mock_ocr:
+            mock_ocr.return_value = OCRDocumentResult(
+                tagged_text=f"[PAGE 1]\n{OCR_UNREADABLE_PAGE_MARKER}\n\n[PAGE 2]\nVăn bản OCR",
+                page_count=2,
+                pages=[OCRPageResult(page_num=2, text="Văn bản OCR")],
+                provider="mock_qwen",
+                failed_pages=[OCRFailedPageInfo(page=1, reason=OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES, detail="Trang 1 có nội dung OCR hoàn toàn rỗng.")],
+            )
+            result = DocumentIngestionRouter.ingest_document("dummy.pdf", max_failed_pages=2)
+
+            assert mock_ocr.call_args.kwargs["max_failed_pages"] == 2
+            assert len(result.failed_pages) == 1
+            assert result.failed_pages[0].page == 1
+            assert result.failed_pages[0].reason == "OCR_EMPTY_AFTER_RETRIES"
+            assert OCR_UNREADABLE_PAGE_MARKER in result.tagged_text
+
+
+def test_document_result_failed_pages_defaults_to_empty_list():
+    """L: DocumentIngestionResult.failed_pages defaults to [] -- legal/business/CIC
+    (and any digital-only path) never populate it."""
+    assert os.path.exists(SAMPLE_MULTIPAGE_PDF)
+    result = DocumentIngestionRouter.ingest_document(SAMPLE_MULTIPAGE_PDF)
+    assert result.failed_pages == []
+
+
+def test_l_default_ingest_document_call_never_passes_max_failed_pages_downstream():
+    """L. Legal/business/CIC call ingest_document() without max_failed_pages ->
+    PDFOCRIngestor.extract_document() receives max_failed_pages=None, i.e. the
+    exact pre-existing (unmodified) OCR behavior."""
+    with patch("msb_eb_copilot.src.ingestion.pdf_text.PDFTextIngestor.extract_text_with_page_markers",
+               side_effect=PDFBlankPageError("Trang 1 không có text")):
+        with patch("msb_eb_copilot.src.ingestion.pdf_ocr.PDFOCRIngestor.extract_document") as mock_ocr:
+            mock_ocr.return_value = OCRDocumentResult(
+                tagged_text="[PAGE 1]\nVăn bản OCR",
+                page_count=1,
+                pages=[OCRPageResult(page_num=1, text="Văn bản OCR")],
+                provider="mock_qwen",
+            )
+            result = DocumentIngestionRouter.ingest_document("dummy.pdf")
+            assert mock_ocr.call_args.kwargs["max_failed_pages"] is None
+            assert result.failed_pages == []
+
+
+def test_l_hybrid_path_failed_pages_propagate_and_use_unreadable_marker():
+    """I/L: hybrid mode (digital + OCR-needed pages) also propagates failed_pages
+    and inserts the OCR_UNREADABLE_PAGE_MARKER for the failed OCR-needed page,
+    while the digital page's real text is completely unaffected."""
+    assert os.path.exists(MIXED_BLANK_PDF)
+
+    def fake_ocr_pages_parallel(pdf_path, page_nums, engine=None, dpi=150, max_workers=None,
+                                 progress_callback=None, max_failed_pages=None, failed_pages_out=None):
+        results = {}
+        for p in page_nums:
+            if failed_pages_out is not None and max_failed_pages is not None:
+                failed_pages_out.append(OCRFailedPageInfo(
+                    page=p, reason=OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES,
+                    detail=f"Trang {p} có nội dung OCR hoàn toàn rỗng.",
+                ))
+            else:
+                results[p] = OCRPageResult(page_num=p, text=f"OCR trang {p}", provider="mock")
+        return results
+
+    with patch("msb_eb_copilot.src.ingestion.pdf_ocr.PDFOCRIngestor.ocr_pages_parallel",
+               side_effect=fake_ocr_pages_parallel):
+        result = DocumentIngestionRouter.ingest_document(MIXED_BLANK_PDF, max_failed_pages=2)
+
+    assert result.mode == "hybrid"
+    assert len(result.failed_pages) == 1
+    assert result.failed_pages[0].page == 2
+    assert f"[PAGE 2]\n{OCR_UNREADABLE_PAGE_MARKER}" in result.tagged_text
+    # Digital page 1's real text is untouched by the failure.
+    assert result.tagged_text.startswith("[PAGE 1]\nCÔNG TY CỔ PHẦN KINH DOANH KHÍ MIỀN NAM")

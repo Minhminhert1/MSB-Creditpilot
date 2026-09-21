@@ -24,7 +24,13 @@ from msb_eb_copilot.src.extraction.financial_extraction import (
     FinancialDocumentExtraction,
     FinancialPeriodExtraction,
 )
-from msb_eb_copilot.src.ingestion.pdf_ocr import OCRServiceError
+from msb_eb_copilot.src.ingestion.pdf_ocr import (
+    OCRServiceError,
+    OCRNoTextError,
+    OCRFailedPageInfo,
+    OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES,
+    OCR_UNREADABLE_PAGE_MARKER,
+)
 from msb_eb_copilot.src.ingestion.router import DocumentIngestionResult
 
 FAKE_SECRET = "sk-LIVE-super-secret-should-never-leak-abc123"
@@ -43,6 +49,31 @@ def _fake_ingestion_result(page_count: int = 1) -> DocumentIngestionResult:
         page_count=page_count,
         tagged_text=tagged,
         fallback_reason="PDFBlankPageError",
+    )
+
+
+def _fake_ingestion_result_with_failed_pages(page_count: int, failed_page_nums: list) -> DocumentIngestionResult:
+    """Simulates a financial ingestion that tolerated some OCR-unreadable pages
+    (page-level degraded handling) and still succeeded overall."""
+    blocks = []
+    for i in range(1, page_count + 1):
+        if i in failed_page_nums:
+            blocks.append(f"[PAGE {i}]\n{OCR_UNREADABLE_PAGE_MARKER}")
+        else:
+            blocks.append(f"[PAGE {i}]\nNội dung trang {i}")
+    return DocumentIngestionResult(
+        mode="ocr",
+        provider="qwen_vision",
+        page_count=page_count,
+        tagged_text="\n\n".join(blocks),
+        fallback_reason="PDFBlankPageError",
+        failed_pages=[
+            OCRFailedPageInfo(
+                page=p, reason=OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES,
+                detail=f"Trang {p} có nội dung OCR hoàn toàn rỗng.",
+            )
+            for p in failed_page_nums
+        ],
     )
 
 
@@ -359,6 +390,104 @@ class TestFinancialPreviewJobFlow(_HTTPHandlerTestMixin, unittest.TestCase):
         status_code, body = self._invoke_get("/api/financial_preview_job/does-not-exist-uuid")
         self.assertEqual(status_code, 404)
         self.assertEqual(body["error_type"], "JobNotFoundError")
+
+    # -- D/E/F/I: page-level degraded OCR handling reaching the background job --
+
+    def test_d_one_failed_page_job_completes_with_warning(self):
+        """D. One failed page -> job completes (status=completed) with warning
+        metadata in the result payload."""
+        job_id = w.FINANCIAL_JOB_MANAGER.create_job(case_id="PSD")
+        ingestion_result = _fake_ingestion_result_with_failed_pages(page_count=46, failed_page_nums=[33])
+
+        with patch.object(w.DocumentIngestionRouter, "ingest_document", return_value=ingestion_result), \
+             patch.object(w.FinancialDocumentExtractor, "extract", return_value=MINIMAL_EXTRACTION):
+            w._run_financial_preview_job(job_id, b"%PDF-1.4 dummy", "bctc.pdf", "PSD")
+
+        snap = w.FINANCIAL_JOB_MANAGER.get_job_snapshot(job_id)
+        self.assertEqual(snap["status"], "completed")
+        self.assertEqual(snap["result"]["ocr_warnings"], {"failed_pages": [33], "failed_page_count": 1})
+
+    def test_e_two_failed_pages_job_completes_with_warnings(self):
+        """E. Two failed pages (at the default threshold) -> job still completes
+        with both pages listed in the warning metadata."""
+        job_id = w.FINANCIAL_JOB_MANAGER.create_job(case_id="PSD")
+        ingestion_result = _fake_ingestion_result_with_failed_pages(page_count=46, failed_page_nums=[33, 41])
+
+        with patch.object(w.DocumentIngestionRouter, "ingest_document", return_value=ingestion_result), \
+             patch.object(w.FinancialDocumentExtractor, "extract", return_value=MINIMAL_EXTRACTION):
+            w._run_financial_preview_job(job_id, b"%PDF-1.4 dummy", "bctc.pdf", "PSD")
+
+        snap = w.FINANCIAL_JOB_MANAGER.get_job_snapshot(job_id)
+        self.assertEqual(snap["status"], "completed")
+        self.assertEqual(snap["result"]["ocr_warnings"], {"failed_pages": [33, 41], "failed_page_count": 2})
+
+    def test_zero_failed_pages_result_has_empty_ocr_warnings(self):
+        """Normal path (0 failed pages): ocr_warnings still present but empty --
+        frontend can always safely read failed_page_count without an existence check."""
+        job_id = w.FINANCIAL_JOB_MANAGER.create_job(case_id="PSD")
+        with patch.object(w.DocumentIngestionRouter, "ingest_document", return_value=_fake_ingestion_result(page_count=2)), \
+             patch.object(w.FinancialDocumentExtractor, "extract", return_value=MINIMAL_EXTRACTION):
+            w._run_financial_preview_job(job_id, b"%PDF-1.4 dummy", "bctc.pdf", "PSD")
+
+        snap = w.FINANCIAL_JOB_MANAGER.get_job_snapshot(job_id)
+        self.assertEqual(snap["status"], "completed")
+        self.assertEqual(snap["result"]["ocr_warnings"], {"failed_pages": [], "failed_page_count": 0})
+
+    def test_f_threshold_exceeded_job_fails_via_existing_vietnamese_error_path(self):
+        """F. When the OCR layer itself determines failed_pages exceeds the
+        configured threshold, it raises OCRNoTextError (Zero Silent Fallback) --
+        the job must transition to status=failed using the EXISTING generic
+        Vietnamese error path (no new special-cased handling needed)."""
+        job_id = w.FINANCIAL_JOB_MANAGER.create_job(case_id="PSD")
+
+        def raise_threshold_exceeded(*args, **kwargs):
+            raise OCRNoTextError(
+                "Không thể xử lý tài liệu: 3 trang không thể đọc được bằng OCR sau khi đã "
+                "thử hết mọi lần thử lại (vượt quá ngưỡng cho phép tối đa 2 trang): trang 10, 20, 30."
+            )
+
+        with patch.object(w.DocumentIngestionRouter, "ingest_document", side_effect=raise_threshold_exceeded):
+            w._run_financial_preview_job(job_id, b"%PDF-1.4 dummy", "bctc.pdf", "PSD")
+
+        snap = w.FINANCIAL_JOB_MANAGER.get_job_snapshot(job_id)
+        self.assertEqual(snap["status"], "failed")
+        self.assertIn("Lỗi xử lý BCTC", snap["error"]["message"])
+        self.assertIn("vượt quá ngưỡng", snap["error"]["message"])
+        self.assertIsNone(snap["result"])
+
+    def test_i_failed_pages_metadata_reaches_final_web_result_via_http(self):
+        """I. End-to-end through the real HTTP POST + polling GET route: job_id
+        from POST, then GET the job after it completes, and confirm ocr_warnings
+        is present in the final web-facing result payload."""
+        ingestion_result = _fake_ingestion_result_with_failed_pages(page_count=46, failed_page_nums=[33])
+
+        with patch.object(w.DocumentIngestionRouter, "ingest_document", return_value=ingestion_result), \
+             patch.object(w.FinancialDocumentExtractor, "extract", return_value=MINIMAL_EXTRACTION):
+            status, data = self._invoke_post("/api/preview_financial_pdf", {
+                "filename": "bctc.pdf",
+                "content_base64": base64.b64encode(b"%PDF-1.4 dummy").decode("utf-8"),
+                "case_id": "PSD",
+            })
+            self.assertEqual(status, 202)
+            job_id = data["job_id"]
+
+            ok = _wait_until(lambda: w.FINANCIAL_JOB_MANAGER.get_job_snapshot(job_id)["status"] == "completed")
+            self.assertTrue(ok)
+
+            poll_status, poll_body = self._invoke_get(f"/api/financial_preview_job/{job_id}")
+
+        self.assertEqual(poll_status, 200)
+        self.assertEqual(poll_body["status"], "completed")
+        self.assertEqual(poll_body["result"]["ocr_warnings"], {"failed_pages": [33], "failed_page_count": 1})
+
+    def test_j_frontend_html_renders_inline_ocr_warning_panel_not_alert(self):
+        """J. The served frontend page contains the inline warning panel logic
+        (not alert()) for rendering ocr_warnings in the financial review modal."""
+        html = w.HTML_PAGE
+        self.assertIn("ocr_warnings", html)
+        self.assertIn("ocr-degraded-warning-panel", html)
+        self.assertIn("OCR không đọc được", html)
+        self.assertIn("Vui lòng kiểm tra thủ công", html)
 
 
 if __name__ == "__main__":

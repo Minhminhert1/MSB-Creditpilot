@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field, model_validator
 
 from msb_eb_copilot.src.ai_client import AIAssistantClient
+from msb_eb_copilot.src.ingestion.pdf_ocr import OCR_UNREADABLE_PAGE_MARKER
 
 
 # ==============================================================================
@@ -579,7 +580,19 @@ QUY TẮC CỐT LÕI (BẮT BUỘC TUÂN THỦ 100%):
        và page đều khác null -- không được để một phần null.
 6. PHÂN TÁCH RÕ RÀNG TỪNG NĂM / KỲ KẾ TOÁN (PERIOD):
    - Xác định rõ cột số liệu thuộc năm nào (ví dụ: '2025', '2024'). Không được tráo đổi thứ tự cột.
-7. ĐỊNH DẠNG ĐẦU RA:
+7. TRANG OCR KHÔNG ĐỌC ĐƯỢC (ĐÁNH DẤU {OCR_UNREADABLE_MARKER}):
+   - Một số trang có thể được đánh dấu nội dung đúng bằng chuỗi tất định
+     "{OCR_UNREADABLE_MARKER}" thay vì văn bản thật -- điều này có nghĩa là hệ thống OCR
+     KHÔNG đọc được trang đó sau khi đã thử lại nhiều lần (không phải trang trắng, không
+     phải lỗi của bạn).
+   - Một trang có đánh dấu "{OCR_UNREADABLE_MARKER}" HOÀN TOÀN KHÔNG chứa bằng chứng
+     (evidence) sử dụng được. TUYỆT ĐỐI KHÔNG được:
+     * Suy đoán, ước lượng, hay "điền vào chỗ trống" bất kỳ số liệu nào cho trang đó.
+     * Sao chép/kế thừa đơn vị tính (unit) hoặc evidence từ trang khác sang cho trang đó.
+     * Giả định trang đó là trang trắng hoặc không quan trọng.
+     * Trích dẫn số trang đó (page) làm bằng chứng cho bất kỳ chỉ tiêu hay unit nào.
+   - Quy tắc "NO EVIDENCE -> NO FACT" ở mục 1 áp dụng NGHIÊM NGẶT cho các trang này.
+8. ĐỊNH DẠNG ĐẦU RA:
    - BẮT BUỘC trả về định dạng JSON thuần túy (strict JSON), KHÔNG dùng Markdown fence (không viết ```json), KHÔNG có lời giải thích bên ngoài.
 
 CẤU TRÚC JSON MẪU:
@@ -615,6 +628,15 @@ CẤU TRÚC JSON MẪU:
   ]
 }
 """
+
+# Substitutes the OCR_UNREADABLE marker's single source of truth
+# (pdf_ocr.OCR_UNREADABLE_PAGE_MARKER) into the prompt via a plain placeholder
+# token/str.replace() rather than str.format(), since the prompt's JSON example
+# already contains many literal '{'/'}' characters that would otherwise need
+# escaping.
+FINANCIAL_EXTRACTION_SYSTEM_PROMPT = FINANCIAL_EXTRACTION_SYSTEM_PROMPT.replace(
+    "{OCR_UNREADABLE_MARKER}", OCR_UNREADABLE_PAGE_MARKER
+)
 
 
 # ==============================================================================
@@ -817,6 +839,47 @@ def get_financial_extraction_max_workers(configured: Optional[Union[int, str]] =
         return DEFAULT_FINANCIAL_EXTRACTION_MAX_WORKERS
     if val > MAX_FINANCIAL_EXTRACTION_MAX_WORKERS:
         return MAX_FINANCIAL_EXTRACTION_MAX_WORKERS
+    return val
+
+
+# Deterministic page-level degraded-handling threshold for FINANCIAL PDF OCR only
+# (legal/business/CIC ingestion never reads this -- they keep the pre-existing
+# "any OCR failure aborts the whole document" behavior unconditionally).
+DEFAULT_FINANCIAL_OCR_MAX_FAILED_PAGES = 2
+MIN_FINANCIAL_OCR_MAX_FAILED_PAGES = 0
+
+
+def get_financial_ocr_max_failed_pages(configured: Optional[Union[int, str]] = None) -> int:
+    """Xác định ngưỡng tối đa số trang OCR được phép dung thứ (tolerate) là không đọc
+    được (sau khi đã hết mọi lần thử lại nội dung rỗng) trước khi toàn bộ quá trình
+    nhập liệu BCTC bị coi là thất bại.
+
+    Quy tắc:
+    - Nếu truyền configured: dùng giá trị đó sau khi kiểm tra.
+    - Nếu không: đọc biến môi trường FINANCIAL_OCR_MAX_FAILED_PAGES.
+    - Nếu không có biến MT hoặc rỗng: mặc định DEFAULT_FINANCIAL_OCR_MAX_FAILED_PAGES (2).
+    - Nếu giá trị không parse được thành số nguyên, hoặc < 0: an toàn trả về mặc định 2.
+    - Giá trị >= 0 hợp lệ: trả về nguyên giá trị đó (0 nghĩa là KHÔNG dung thứ bất kỳ
+      trang lỗi nào -- tương đương thất bại ngay khi có 1 trang không đọc được).
+    """
+    raw_val = configured
+    if raw_val is None:
+        raw_env = os.getenv("FINANCIAL_OCR_MAX_FAILED_PAGES")
+        if raw_env is not None and str(raw_env).strip():
+            try:
+                raw_val = int(str(raw_env).strip())
+            except ValueError:
+                return DEFAULT_FINANCIAL_OCR_MAX_FAILED_PAGES
+        else:
+            return DEFAULT_FINANCIAL_OCR_MAX_FAILED_PAGES
+
+    try:
+        val = int(raw_val)
+    except (ValueError, TypeError):
+        return DEFAULT_FINANCIAL_OCR_MAX_FAILED_PAGES
+
+    if val < MIN_FINANCIAL_OCR_MAX_FAILED_PAGES:
+        return DEFAULT_FINANCIAL_OCR_MAX_FAILED_PAGES
     return val
 
 

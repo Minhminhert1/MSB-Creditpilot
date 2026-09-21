@@ -193,12 +193,49 @@ class OCRPageResult(BaseModel):
     metadata: Optional[Dict[str, Any]] = Field(default=None, description="Metadata phụ trợ (DPI, kích thước ảnh)")
 
 
+class OCRFailedPageInfo(BaseModel):
+    """Metadata for ONE physical page that could not be OCR'd after all existing
+    retries (429 / transient 5xx / same-page empty-content retries) were
+    exhausted. SAFE BY CONSTRUCTION: only ever a page number, a fixed
+    machine-readable reason code, and a short already-safe (Vietnamese,
+    no-secrets) detail string -- never the raw exception object, base64 image,
+    request/response payload, or API key."""
+    page: int = Field(..., description="Physical 1-indexed page number that could not be OCR'd")
+    reason: str = Field(..., description="Fixed machine-readable failure reason code, e.g. 'OCR_EMPTY_AFTER_RETRIES'")
+    detail: Optional[str] = Field(None, description="Short safe human-readable detail (already sanitized)")
+
+
+OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES = "OCR_EMPTY_AFTER_RETRIES"
+
+# Deterministic marker inserted into tagged_text in place of a page's real OCR
+# text when that page was tolerated as a degraded/failed page (see
+# PDFOCRIngestor.ocr_pages_parallel's `max_failed_pages` / `failed_pages_out`).
+# Chosen over silently OMITTING the [PAGE X] block entirely because
+# parse_tagged_pages() (financial_extraction.py) STRICTLY requires an unbroken
+# 1..N sequence of [PAGE X] markers with no gaps -- omitting the block would
+# itself raise FinancialPageMarkerError and defeat the whole point of this
+# feature. Keeping an explicit, deterministic, obviously-non-financial marker:
+#   - preserves the page-count invariant used throughout this codebase,
+#   - gives the downstream LLM an explicit, auditable signal (reinforced by the
+#     extraction prompt) that this page has zero usable evidence,
+#   - and even if the LLM ignored that instruction and hallucinated a fact
+#     citing this page, FinancialGroundingAuditor's "evidence found on declared
+#     page" check would still fail closed, since the marker text can never
+#     contain any real evidence string.
+OCR_UNREADABLE_PAGE_MARKER = "[OCR_UNREADABLE]"
+
+
 class OCRDocumentResult(BaseModel):
     """Tập hợp kết quả OCR cấp tài liệu chứa đầy đủ từng trang vật lý."""
     tagged_text: str = Field(..., description="Chuỗi văn bản định dạng thẻ [PAGE X] chuẩn hợp đồng")
     page_count: int = Field(..., description="Tổng số trang vật lý đã xử lý thành công")
-    pages: List[OCRPageResult] = Field(..., description="Danh sách kết quả OCR chi tiết cho từng trang")
+    pages: List[OCRPageResult] = Field(..., description="Danh sách kết quả OCR chi tiết cho từng trang (KHÔNG bao gồm các trang trong failed_pages)")
     provider: str = Field(default="qwen_vision", description="Tên định danh của OCR engine")
+    failed_pages: List[OCRFailedPageInfo] = Field(
+        default_factory=list,
+        description="Các trang được dung thứ (tolerated) là không đọc được sau khi đã hết mọi lần thử lại "
+                    "-- CHỈ khác rỗng khi caller truyền max_failed_pages (hiện tại: chỉ luồng OCR tài chính)."
+    )
 
 
 # ==============================================================================
@@ -849,6 +886,8 @@ class PDFOCRIngestor:
         dpi: int = DEFAULT_DPI,
         max_workers: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, int], None]] = None,
+        max_failed_pages: Optional[int] = None,
+        failed_pages_out: Optional[List[OCRFailedPageInfo]] = None,
     ) -> Dict[int, OCRPageResult]:
         """Thực hiện OCR song song có giới hạn (Bounded Parallel OCR) cho danh sách các trang vật lý.
 
@@ -858,18 +897,35 @@ class PDFOCRIngestor:
             engine: OCR Engine tùy chọn.
             dpi: Độ phân giải rasterize (mặc định 150 DPI).
             max_workers: Số luồng tối đa (mặc định đọc từ OCR_MAX_WORKERS hoặc 4, bounded [1, 8]).
-            progress_callback: Tùy chọn, gọi lại sau MỖI trang hoàn tất thành công với
-                (page_num, completed_count, total_pages) -- dùng cho việc báo cáo tiến
-                độ (ví dụ: job nền của giao diện web). Không ảnh hưởng đến logic OCR/
-                retry hiện có; nếu callback tự ném lỗi, lỗi đó được nuốt (không làm hỏng
-                luồng OCR chính) vì đây chỉ là kênh báo cáo phụ trợ.
+            progress_callback: Tùy chọn, gọi lại sau MỖI trang hoàn tất (thành công HOẶC
+                dung thứ là lỗi -- xem max_failed_pages) với (page_num, completed_count,
+                total_pages) -- dùng cho việc báo cáo tiến độ (ví dụ: job nền của giao
+                diện web). Không ảnh hưởng đến logic OCR/retry hiện có; nếu callback tự
+                ném lỗi, lỗi đó được nuốt (không làm hỏng luồng OCR chính) vì đây chỉ là
+                kênh báo cáo phụ trợ.
+            max_failed_pages: MẶC ĐỊNH None -- giữ NGUYÊN hành vi hiện tại: BẤT KỲ ngoại lệ
+                nào (kể cả OCRNoTextError) đều hủy toàn bộ ngay lập tức. Chỉ luồng OCR tài
+                chính (financial) mới truyền một số nguyên >= 0 để bật chế độ "dung thứ trang
+                lỗi": CHỈ OCRNoTextError (hết retry nội dung rỗng) được dung thứ -- trang đó
+                được ghi nhận vào failed_pages_out và quá trình tiếp tục với các trang còn
+                lại; các ngoại lệ khác (OCRServiceError, OCRTimeoutError, OCRRenderError,
+                OCRPageCountError,...) vẫn hủy toàn bộ ngay lập tức bất kể tham số này -- đó
+                là lỗi dịch vụ/hạ tầng thực sự, không phải một trang đơn lẻ không đọc được.
+                Nếu tổng số trang dung thứ vượt quá max_failed_pages, ném OCRNoTextError
+                sau khi đã thử hết mọi trang (không hủy sớm giữa chừng).
+            failed_pages_out: Danh sách rỗng do caller truyền vào, được nối thêm
+                (extend, không xóa nội dung cũ) từng OCRFailedPageInfo theo thứ tự hoàn tất.
+                Bị bỏ qua nếu max_failed_pages là None.
 
         Returns:
-            Dict mapping từ page_num -> OCRPageResult.
+            Dict mapping từ page_num -> OCRPageResult (KHÔNG chứa các trang đã dung thứ lỗi).
 
         Raises:
-            OCRIngestionError (OCRTimeoutError, OCRNoTextError, OCRServiceError, OCRRenderError,...):
-            Nếu bất kỳ trang nào thất bại, ngoại lệ nguyên gốc được lan truyền và hủy các tác vụ chờ.
+            OCRIngestionError (OCRTimeoutError, OCRServiceError, OCRRenderError,...):
+            Nếu bất kỳ trang nào thất bại vì lý do KHÔNG phải OCRNoTextError, hoặc nếu
+            max_failed_pages là None, ngoại lệ nguyên gốc được lan truyền và hủy các tác
+            vụ chờ.
+            OCRNoTextError: Nếu số trang dung thứ vượt quá max_failed_pages.
         """
         if not page_nums:
             return {}
@@ -878,6 +934,8 @@ class PDFOCRIngestor:
         workers = get_ocr_max_workers(max_workers)
         effective_workers = min(workers, len(page_nums))
         total_pages = len(page_nums)
+        tolerate_mode = max_failed_pages is not None
+        local_failed_pages: List[OCRFailedPageInfo] = []
 
         def _report_progress(p_num: int, completed_count: int) -> None:
             if progress_callback is None:
@@ -887,58 +945,98 @@ class PDFOCRIngestor:
             except Exception:
                 pass
 
+        def _record_failed_page(p_num: int, exc: "OCRNoTextError") -> None:
+            local_failed_pages.append(OCRFailedPageInfo(
+                page=p_num,
+                reason=OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES,
+                detail=str(exc),
+            ))
+            logger.warning(
+                "OCR page unreadable after all content retries -- marking page=%s as "
+                "failed (reason=%s) and continuing with remaining pages",
+                p_num, OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES,
+            )
+
         # Nếu chỉ có 1 trang hoặc workers == 1: chạy tuần tự an toàn
         if effective_workers == 1:
             results: Dict[int, OCRPageResult] = {}
             completed_count = 0
             for p_num in page_nums:
-                page_res = cls.ocr_single_page(
-                    doc_or_path=pdf_path,
-                    page_num=p_num,
-                    engine=active_engine,
-                    dpi=dpi
-                )
-                results[p_num] = page_res
+                try:
+                    page_res = cls.ocr_single_page(
+                        doc_or_path=pdf_path,
+                        page_num=p_num,
+                        engine=active_engine,
+                        dpi=dpi
+                    )
+                    results[p_num] = page_res
+                except OCRNoTextError as exc:
+                    if not tolerate_mode:
+                        raise
+                    _record_failed_page(p_num, exc)
                 completed_count += 1
                 _report_progress(p_num, completed_count)
-            return results
+        else:
+            # Chạy song song có giới hạn bằng ThreadPoolExecutor
+            results: Dict[int, OCRPageResult] = {}
+            first_exception: Optional[Exception] = None
+            completed_count = 0
 
-        # Chạy song song có giới hạn bằng ThreadPoolExecutor
-        results: Dict[int, OCRPageResult] = {}
-        first_exception: Optional[Exception] = None
-        completed_count = 0
+            with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                future_to_page = {
+                    executor.submit(
+                        cls.ocr_single_page,
+                        doc_or_path=pdf_path,
+                        page_num=p_num,
+                        engine=active_engine,
+                        dpi=dpi
+                    ): p_num
+                    for p_num in page_nums
+                }
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            future_to_page = {
-                executor.submit(
-                    cls.ocr_single_page,
-                    doc_or_path=pdf_path,
-                    page_num=p_num,
-                    engine=active_engine,
-                    dpi=dpi
-                ): p_num
-                for p_num in page_nums
-            }
+                # as_completed() yields on this single (calling) thread only, so
+                # completed_count/_report_progress here need no extra lock even
+                # though the underlying OCR calls run concurrently.
+                for future in concurrent.futures.as_completed(future_to_page):
+                    p_num = future_to_page[future]
+                    try:
+                        res = future.result()
+                        results[p_num] = res
+                        completed_count += 1
+                        _report_progress(p_num, completed_count)
+                    except OCRNoTextError as exc:
+                        if not tolerate_mode:
+                            if first_exception is None:
+                                first_exception = exc
+                            for f in future_to_page:
+                                f.cancel()
+                        else:
+                            _record_failed_page(p_num, exc)
+                            completed_count += 1
+                            _report_progress(p_num, completed_count)
+                    except Exception as exc:
+                        if first_exception is None:
+                            first_exception = exc
+                        # Hủy các future còn đang pending trong queue
+                        for f in future_to_page:
+                            f.cancel()
 
-            # as_completed() yields on this single (calling) thread only, so
-            # completed_count/_report_progress here need no extra lock even
-            # though the underlying OCR calls run concurrently.
-            for future in concurrent.futures.as_completed(future_to_page):
-                p_num = future_to_page[future]
-                try:
-                    res = future.result()
-                    results[p_num] = res
-                    completed_count += 1
-                    _report_progress(p_num, completed_count)
-                except Exception as exc:
-                    if first_exception is None:
-                        first_exception = exc
-                    # Hủy các future còn đang pending trong queue
-                    for f in future_to_page:
-                        f.cancel()
+            if first_exception is not None:
+                raise first_exception
 
-        if first_exception is not None:
-            raise first_exception
+        # Ngưỡng dung thứ: chỉ kiểm tra SAU KHI đã thử hết mọi trang (không hủy sớm),
+        # để các trang sau trang lỗi vẫn luôn được thử OCR và tính vào tiến độ.
+        if tolerate_mode and len(local_failed_pages) > max_failed_pages:
+            failed_page_nums = sorted(fp.page for fp in local_failed_pages)
+            pages_str = ", ".join(str(p) for p in failed_page_nums)
+            raise OCRNoTextError(
+                f"Không thể xử lý tài liệu: {len(local_failed_pages)} trang không thể đọc "
+                f"được bằng OCR sau khi đã hết mọi lần thử lại (vượt quá ngưỡng cho phép "
+                f"tối đa {max_failed_pages} trang): trang {pages_str}."
+            )
+
+        if failed_pages_out is not None:
+            failed_pages_out.extend(local_failed_pages)
 
         return results
 
@@ -950,8 +1048,16 @@ class PDFOCRIngestor:
         dpi: int = DEFAULT_DPI,
         max_workers: Optional[int] = None,
         progress_callback: Optional[Callable[[int, int, int], None]] = None,
+        max_failed_pages: Optional[int] = None,
     ) -> OCRDocumentResult:
-        """Thực hiện OCR toàn bộ tài liệu PDF và trả về đối tượng kết quả có cấu trúc."""
+        """Thực hiện OCR toàn bộ tài liệu PDF và trả về đối tượng kết quả có cấu trúc.
+
+        max_failed_pages: xem docstring của ocr_pages_parallel. Mặc định None giữ
+        nguyên hành vi hiện tại (bất kỳ trang lỗi nào cũng hủy toàn bộ tài liệu).
+        Khi được truyền (hiện tại: chỉ luồng OCR tài chính), các trang được dung
+        thứ sẽ xuất hiện trong tagged_text dưới dạng [PAGE X]\\nOCR_UNREADABLE_PAGE_MARKER
+        (KHÔNG bịa nội dung) và trong OCRDocumentResult.failed_pages.
+        """
         # 1. Preflight xác định số trang dự kiến bằng pypdf
         expected_page_count = cls._preflight_pdf(pdf_path)
 
@@ -977,6 +1083,7 @@ class PDFOCRIngestor:
 
         # 4. Thực hiện OCR song song có giới hạn cho toàn bộ các trang 1..N
         all_pages = list(range(1, expected_page_count + 1))
+        failed_pages: List[OCRFailedPageInfo] = []
         results_by_page = cls.ocr_pages_parallel(
             pdf_path=pdf_path,
             page_nums=all_pages,
@@ -984,25 +1091,43 @@ class PDFOCRIngestor:
             dpi=dpi,
             max_workers=max_workers,
             progress_callback=progress_callback,
+            max_failed_pages=max_failed_pages,
+            failed_pages_out=failed_pages,
         )
 
-        # 5. Đối chiếu bất biến số lượng kết quả
-        if len(results_by_page) != expected_page_count:
+        # 5. Đối chiếu bất biến số lượng kết quả: mỗi trang vật lý phải HOẶC có kết
+        # quả OCR thành công, HOẶC được ghi nhận là trang lỗi đã dung thứ -- không
+        # trang nào được phép biến mất khỏi cả hai tập hợp.
+        accounted_for = len(results_by_page) + len(failed_pages)
+        if accounted_for != expected_page_count:
             raise OCRPageCountError(
                 f"Bất biến số trang bị vi phạm: Dự kiến {expected_page_count} trang, "
-                f"nhưng chỉ thu được {len(results_by_page)} kết quả OCR."
+                f"nhưng chỉ thu được {len(results_by_page)} kết quả OCR thành công và "
+                f"{len(failed_pages)} trang lỗi đã ghi nhận."
             )
 
-        # 6. Lắp ráp chuỗi định dạng thẻ [PAGE X] chuẩn hợp đồng theo đúng thứ tự 1..N
-        page_results = [results_by_page[p_num] for p_num in range(1, expected_page_count + 1)]
-        tagged_blocks = [f"[PAGE {p.page_num}]\n{p.text}" for p in page_results]
+        # 6. Lắp ráp chuỗi định dạng thẻ [PAGE X] chuẩn hợp đồng theo đúng thứ tự 1..N.
+        # Trang lỗi (nếu có) dùng marker tất định OCR_UNREADABLE_PAGE_MARKER --
+        # TUYỆT ĐỐI KHÔNG bịa đặt nội dung, KHÔNG bỏ qua thẻ [PAGE X] (sẽ vi phạm
+        # bất biến chuỗi trang liên tục mà parse_tagged_pages() yêu cầu).
+        failed_page_num_set = {fp.page for fp in failed_pages}
+        page_results: List[OCRPageResult] = []
+        tagged_blocks: List[str] = []
+        for p_num in range(1, expected_page_count + 1):
+            if p_num in failed_page_num_set:
+                tagged_blocks.append(f"[PAGE {p_num}]\n{OCR_UNREADABLE_PAGE_MARKER}")
+            else:
+                p_res = results_by_page[p_num]
+                page_results.append(p_res)
+                tagged_blocks.append(f"[PAGE {p_res.page_num}]\n{p_res.text}")
         tagged_text = "\n\n".join(tagged_blocks)
 
         return OCRDocumentResult(
             tagged_text=tagged_text,
             page_count=expected_page_count,
             pages=page_results,
-            provider=getattr(active_engine, "provider_name", "qwen_vision")
+            provider=getattr(active_engine, "provider_name", "qwen_vision"),
+            failed_pages=failed_pages,
         )
 
     @classmethod

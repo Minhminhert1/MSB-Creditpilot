@@ -185,6 +185,7 @@ from msb_eb_copilot.src.extraction.financial_extraction import (
     FinancialPeriodExtraction,
     FinancialEvidenceField,
     FinancialGroundingAuditor,
+    get_financial_ocr_max_failed_pages,
 )
 from msb_eb_copilot.src.mapping.financial_mapper import (
     FinancialDocumentMapper,
@@ -2289,6 +2290,17 @@ HTML_PAGE = """<!DOCTYPE html>
             <div class="p-2.5 bg-amber-50 border border-amber-200 rounded-lg text-xs space-y-1">
               <div class="font-bold text-amber-800">⚠️ Lưu ý đối soát số liệu BCTC:</div>
               <ul class="list-disc list-inside text-amber-700 text-[11px]">${warnings.map(w => `<li>${w}</li>`).join('')}</ul>
+            </div>
+          `;
+        }
+
+        const ocrWarnings = data.ocr_warnings || null;
+        if (ocrWarnings && Array.isArray(ocrWarnings.failed_pages) && ocrWarnings.failed_pages.length > 0) {
+          const pageList = ocrWarnings.failed_pages.join(', ');
+          const pageWord = ocrWarnings.failed_pages.length > 1 ? 'các trang' : 'trang';
+          html += `
+            <div id="ocr-degraded-warning-panel" class="p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs space-y-1">
+              <div class="font-bold text-amber-800">⚠ OCR không đọc được ${pageWord} ${pageList}. Dữ liệu từ ${ocrWarnings.failed_pages.length > 1 ? 'các trang này' : 'trang này'} không được sử dụng trong quá trình bóc tách. Vui lòng kiểm tra thủ công.</div>
             </div>
           `;
         }
@@ -4431,7 +4443,15 @@ def process_financial_pdf_preview(
             temp_path = tmp.name
 
         # 1. Router Ingestion
-        ingestion_res = DocumentIngestionRouter.ingest_document(temp_path, progress_callback=progress_callback)
+        # max_failed_pages: FINANCIAL-ONLY page-level degraded OCR handling (see
+        # FINANCIAL_OCR_MAX_FAILED_PAGES). Legal/business/CIC previews call
+        # ingest_document() without this param, so they keep the original
+        # "any OCR failure aborts the whole document" behavior unconditionally.
+        ingestion_res = DocumentIngestionRouter.ingest_document(
+            temp_path,
+            progress_callback=progress_callback,
+            max_failed_pages=get_financial_ocr_max_failed_pages(),
+        )
 
         # 2. Financial Extraction via GreenNode
         extractor = FinancialDocumentExtractor()
@@ -4531,6 +4551,14 @@ def process_financial_pdf_preview(
         )
         FINANCIAL_PREVIEW_STORE[preview_id] = record
 
+        # Page-level degraded OCR handling metadata (safe: page numbers + fixed
+        # reason codes only -- see OCRFailedPageInfo). Empty when no pages failed.
+        failed_page_nums = sorted(fp.page for fp in ingestion_res.failed_pages)
+        ocr_warnings = {
+            "failed_pages": failed_page_nums,
+            "failed_page_count": len(failed_page_nums),
+        }
+
         return {
             "status": "success",
             "preview_id": preview_id,
@@ -4540,6 +4568,7 @@ def process_financial_pdf_preview(
             "periods": [p.period.strip() for p in extraction_res.periods if p.period],
             "calculated_ratios": calculated_ratios,
             "audit_warnings": audit_warnings[:10],
+            "ocr_warnings": ocr_warnings,
         }, 200
 
     except PDFEncryptedError:

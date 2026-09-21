@@ -48,6 +48,9 @@ from msb_eb_copilot.src.ingestion.pdf_ocr import (
     _TRANSIENT_5XX_STATUS_CODES,
     _TRANSIENT_5XX_MAX_ATTEMPTS,
     _compute_transient_5xx_wait_seconds,
+    OCRFailedPageInfo,
+    OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES,
+    OCR_UNREADABLE_PAGE_MARKER,
 )
 from msb_eb_copilot.src.extraction.legal_extraction import (
     LegalDocumentExtractor,
@@ -1336,3 +1339,210 @@ def test_scanned_pdf_ingestion_end_to_end_with_legal_extractor():
         assert result.legal_rep_name.value == "Đặng Quốc Hưng"
         assert result.legal_rep_name.evidence == "Họ và tên: Ông Đặng Quốc Hưng"
         assert result.legal_rep_title.value == "Tổng Giám đốc"
+
+
+# ==============================================================================
+# 4. PAGE-LEVEL DEGRADED OCR HANDLING (financial-only opt-in via max_failed_pages)
+# ==============================================================================
+def _fake_ocr_single_page_factory(fail_pages: set):
+    """Builds a PDFOCRIngestor.ocr_single_page replacement (bypasses real PDFium
+    rendering/network calls entirely) that raises OCRNoTextError for the given
+    page numbers (simulating content-retry exhaustion) and returns valid text
+    for everything else."""
+    def _fake(doc_or_path, page_num, engine=None, dpi=150):
+        if page_num in fail_pages:
+            raise OCRNoTextError(f"Trang {page_num} có nội dung OCR hoàn toàn rỗng.")
+        return OCRPageResult(page_num=page_num, text=f"Nội dung hợp lệ trang {page_num}", provider="mock")
+    return _fake
+
+
+@pytest.mark.parametrize("max_workers", [1, 3])
+def test_a_one_failed_page_is_recorded_and_ingestion_continues(max_workers):
+    """A. One page OCR empty after all retries -> page recorded as failed,
+    ingestion continues (both sequential and parallel worker configurations)."""
+    failed_pages: List[OCRFailedPageInfo] = []
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({33})):
+        results = PDFOCRIngestor.ocr_pages_parallel(
+            pdf_path="dummy.pdf",
+            page_nums=[31, 32, 33, 34, 35],
+            max_workers=max_workers,
+            max_failed_pages=2,
+            failed_pages_out=failed_pages,
+        )
+
+    assert 33 not in results
+    assert len(failed_pages) == 1
+    assert failed_pages[0].page == 33
+    assert failed_pages[0].reason == OCR_FAILED_PAGE_REASON_EMPTY_AFTER_RETRIES == "OCR_EMPTY_AFTER_RETRIES"
+    # Safe: no secrets/base64/document content in the recorded detail.
+    assert failed_pages[0].detail == "Trang 33 có nội dung OCR hoàn toàn rỗng."
+
+
+@pytest.mark.parametrize("max_workers", [1, 3])
+def test_b_subsequent_pages_are_still_ocred_after_a_failure(max_workers):
+    """B. Pages after the failed one are still OCR'd (not skipped/aborted)."""
+    failed_pages: List[OCRFailedPageInfo] = []
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({33})):
+        results = PDFOCRIngestor.ocr_pages_parallel(
+            pdf_path="dummy.pdf",
+            page_nums=[31, 32, 33, 34, 35],
+            max_workers=max_workers,
+            max_failed_pages=2,
+            failed_pages_out=failed_pages,
+        )
+
+    assert set(results.keys()) == {31, 32, 34, 35}
+    for p in (31, 32, 34, 35):
+        assert results[p].text == f"Nội dung hợp lệ trang {p}"
+
+
+def test_h_progress_callback_advances_across_a_failed_page():
+    """H. Failed pages still count toward progress -- progress must not get stuck
+    on the failed page; it advances to the next one."""
+    calls = []
+    failed_pages: List[OCRFailedPageInfo] = []
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({33})):
+        PDFOCRIngestor.ocr_pages_parallel(
+            pdf_path="dummy.pdf",
+            page_nums=[31, 32, 33, 34, 35],
+            max_workers=1,
+            max_failed_pages=2,
+            failed_pages_out=failed_pages,
+            progress_callback=lambda page_num, completed, total: calls.append((page_num, completed, total)),
+        )
+
+    assert calls == [(31, 1, 5), (32, 2, 5), (33, 3, 5), (34, 4, 5), (35, 5, 5)]
+
+
+def test_default_max_failed_pages_none_preserves_legacy_immediate_abort():
+    """L (mechanism-level): with max_failed_pages left at its default None, ANY
+    OCRNoTextError still aborts immediately and does not process subsequent
+    pages -- this is exactly legal/business/CIC's unmodified behavior."""
+    calls = []
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({1})):
+        with pytest.raises(OCRNoTextError):
+            PDFOCRIngestor.ocr_pages_parallel(
+                pdf_path="dummy.pdf",
+                page_nums=[1, 2, 3],
+                max_workers=1,
+                progress_callback=lambda page_num, completed, total: calls.append(page_num),
+            )
+    # Aborted immediately on page 1 -- pages 2/3 never attempted (unchanged legacy behavior).
+    assert calls == []
+
+
+def test_f_three_failed_pages_with_default_threshold_2_raises():
+    """F. Three failed pages with threshold=2 (default) -> ingestion fails, but
+    only AFTER every page was attempted (not an early-abort on the 3rd failure)."""
+    failed_pages: List[OCRFailedPageInfo] = []
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({2, 4, 6})):
+        with pytest.raises(OCRNoTextError, match="vượt quá ngưỡng cho phép tối đa 2"):
+            PDFOCRIngestor.ocr_pages_parallel(
+                pdf_path="dummy.pdf",
+                page_nums=[1, 2, 3, 4, 5, 6, 7],
+                max_workers=1,
+                max_failed_pages=2,
+                failed_pages_out=failed_pages,
+            )
+    # failed_pages_out is only populated on success; but the exhaustive attempt
+    # behavior is verified via the progress_callback variant below.
+
+
+def test_f_three_failed_pages_still_attempts_every_page_before_raising():
+    calls = []
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({2, 4, 6})):
+        with pytest.raises(OCRNoTextError):
+            PDFOCRIngestor.ocr_pages_parallel(
+                pdf_path="dummy.pdf",
+                page_nums=[1, 2, 3, 4, 5, 6, 7],
+                max_workers=1,
+                max_failed_pages=2,
+                progress_callback=lambda page_num, completed, total: calls.append(page_num),
+            )
+    # All 7 pages were attempted (progress advanced through everything) before
+    # the threshold check raised -- no early abort on the 3rd failure.
+    assert calls == [1, 2, 3, 4, 5, 6, 7]
+
+
+def test_two_failed_pages_within_default_threshold_succeeds():
+    """E (mechanism-level). Two failed pages with the default threshold (2) does
+    NOT raise -- exactly at the boundary."""
+    failed_pages: List[OCRFailedPageInfo] = []
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({2, 4})):
+        results = PDFOCRIngestor.ocr_pages_parallel(
+            pdf_path="dummy.pdf",
+            page_nums=[1, 2, 3, 4, 5],
+            max_workers=1,
+            max_failed_pages=2,
+            failed_pages_out=failed_pages,
+        )
+    assert set(results.keys()) == {1, 3, 5}
+    assert len(failed_pages) == 2
+
+
+def test_g_config_override_max_failed_pages_1_makes_2_failures_raise():
+    """G. A lower configured threshold (1) makes what would otherwise be
+    tolerated (2 failures under the default of 2) now raise."""
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({2, 4})):
+        with pytest.raises(OCRNoTextError, match="vượt quá ngưỡng cho phép tối đa 1"):
+            PDFOCRIngestor.ocr_pages_parallel(
+                pdf_path="dummy.pdf",
+                page_nums=[1, 2, 3, 4, 5],
+                max_workers=1,
+                max_failed_pages=1,
+            )
+
+
+def test_only_ocr_no_text_error_is_tolerated_other_exceptions_still_abort_immediately():
+    """Requirement 10 boundary: OCRServiceError (e.g. a 5xx retry budget already
+    exhausted) is NEVER tolerated regardless of max_failed_pages -- only
+    OCRNoTextError (content-empty-after-retries) is."""
+    def _fake(doc_or_path, page_num, engine=None, dpi=150):
+        if page_num == 2:
+            raise OCRServiceError("Lỗi dịch vụ OCR khi xử lý trang 2: boom")
+        return OCRPageResult(page_num=page_num, text=f"Nội dung trang {page_num}", provider="mock")
+
+    calls = []
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake):
+        with pytest.raises(OCRServiceError):
+            PDFOCRIngestor.ocr_pages_parallel(
+                pdf_path="dummy.pdf",
+                page_nums=[1, 2, 3, 4],
+                max_workers=1,
+                max_failed_pages=2,  # even with tolerate-mode enabled
+                progress_callback=lambda page_num, completed, total: calls.append(page_num),
+            )
+    # Aborted immediately on page 2 -- page 3/4 never attempted, matching the
+    # existing (unchanged) behavior for real service failures.
+    assert calls == [1]
+
+
+def test_extract_document_assembles_ocr_unreadable_marker_and_continues():
+    """A/B/C/K at the extract_document level: the failed page contributes the
+    deterministic OCR_UNREADABLE_PAGE_MARKER (never fabricated text), the page
+    count invariant still holds, and failed_pages is exposed on the result."""
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({1})):
+        doc_result = PDFOCRIngestor.extract_document(
+            SCANNED_FIXTURE_PDF, max_workers=1, max_failed_pages=2,
+        )
+
+    assert doc_result.page_count == 2
+    assert len(doc_result.failed_pages) == 1
+    assert doc_result.failed_pages[0].page == 1
+    assert doc_result.failed_pages[0].reason == "OCR_EMPTY_AFTER_RETRIES"
+    # Only the successful page produces an OCRPageResult -- failed page contributes none.
+    assert len(doc_result.pages) == 1
+    assert doc_result.pages[0].page_num == 2
+    assert f"[PAGE 1]\n{OCR_UNREADABLE_PAGE_MARKER}" in doc_result.tagged_text
+    assert "[PAGE 2]\nNội dung hợp lệ trang 2" in doc_result.tagged_text
+    # No fabrication: the marker text itself never contains real evidence-shaped content.
+    assert "hợp lệ" not in OCR_UNREADABLE_PAGE_MARKER
+
+
+def test_extract_document_default_behavior_unchanged_when_max_failed_pages_none():
+    """L: extract_document() called the way legal/business/CIC call it (no
+    max_failed_pages) still aborts immediately on any OCRNoTextError -- fully
+    unchanged from before this feature existed."""
+    with patch.object(PDFOCRIngestor, "ocr_single_page", side_effect=_fake_ocr_single_page_factory({1})):
+        with pytest.raises(OCRNoTextError):
+            PDFOCRIngestor.extract_document(SCANNED_FIXTURE_PDF, max_workers=1)
