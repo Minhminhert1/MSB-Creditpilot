@@ -54,6 +54,21 @@ def _greennode_secrets_for_log_redaction() -> list[str]:
     ]
 
 from msb_eb_copilot.src.credit_committee_prep import CreditCommitteePrepEngine, CommitteeQuestionCard
+from msb_eb_copilot.src.renewal import (
+    RENEWAL_STORE,
+    RenewalItemNotFoundError,
+    RenewalBaselineExtractionError,
+    extract_old_mb07_baseline,
+    extract_new_canonical_snapshot,
+    build_change_set,
+    RMResolution,
+)
+from msb_eb_copilot.src.ai_challenge import (
+    AI_CHALLENGE_STORE,
+    ChallengeItemNotFoundError,
+    ChallengeStatus as AIChallengeStatus,
+    AIChallengeEngine,
+)
 from msb_eb_copilot.src.narrative import (
     FactPackager, PythonInsightVerifier, GLMInsightDiscoveryAgent,
     GLMNarrativeWriterAgent, DeterministicNarrativeValidator,
@@ -548,6 +563,251 @@ LAST_DOCUMENT_QA_RESULT: Optional[Dict[str, Any]] = None
 def get_active_case():
     global ACTIVE_CASE_ID
     return CASES_DB.get(ACTIVE_CASE_ID, CASES_DB["PSD"])
+
+
+# ==============================================================================
+# WORKSPACE: TÁI CẤP (RENEWAL) -- deterministic ChangeSet, no direct LLM DOCX rewrite
+# ==============================================================================
+MAX_OLD_MB07_UPLOAD_SIZE = 25 * 1024 * 1024  # 25 MB
+
+
+def process_old_mb07_upload(raw_bytes: bytes, filename: str, case_id: str) -> tuple[dict[str, Any], int]:
+    """Trích xuất TẤT ĐỊNH baseline từ Tờ trình MB07 kỳ trước (.docx) và lưu
+    theo case_id (cô lập tuyệt đối, không dùng chung giữa các case)."""
+    try:
+        baseline = extract_old_mb07_baseline(raw_bytes)
+        RENEWAL_STORE.set_old_baseline(case_id, filename, baseline)
+        return {
+            "status": "success",
+            "filename": filename,
+            "parsed_field_count": len(baseline),
+        }, 200
+    except RenewalBaselineExtractionError as e:
+        return {
+            "status": "error",
+            "error_type": "RenewalBaselineExtractionError",
+            "message": f"Không thể đọc Tờ trình MB07 kỳ trước: {e}",
+        }, 400
+    except Exception as e:
+        return {
+            "status": "error",
+            "error_type": "InternalError",
+            "message": f"Lỗi xử lý MB07 kỳ trước: {e}",
+        }, 500
+
+
+def get_renewal_state(case_id: str) -> dict[str, Any]:
+    """Trạng thái Tái cấp của DUY NHẤT case_id được truyền vào -- không bao giờ
+    trộn lẫn dữ liệu case khác."""
+    state = RENEWAL_STORE.get(case_id)
+    case_data = CASES_DB.get(case_id, {})
+    has_financial = bool(case_data.get("section_d", {}).get("net_revenue"))
+    has_legal = bool(case_data.get("customer", {}).get("name"))
+    has_business = bool(case_data.get("section_c", {}).get("customers"))
+    has_cic = bool(case_data.get("section_e", {}).get("history_status"))
+
+    if state is None:
+        return {
+            "status": "success",
+            "case_id": case_id,
+            "has_old_mb07": False,
+            "old_mb07_filename": None,
+            "new_documents": {"financial": has_financial, "legal": has_legal, "business": has_business, "cic": has_cic},
+            "has_change_analysis": False,
+            "change_set": None,
+            "rm_review_complete": False,
+        }
+
+    change_set_payload = None
+    rm_review_complete = False
+    if state.change_set is not None:
+        change_set_payload = json.loads(state.change_set.model_dump_json())
+        rm_review_complete = state.change_set.is_rm_review_complete
+
+    return {
+        "status": "success",
+        "case_id": case_id,
+        "has_old_mb07": state.has_old_mb07,
+        "old_mb07_filename": state.old_mb07_filename,
+        "new_documents": {"financial": has_financial, "legal": has_legal, "business": has_business, "cic": has_cic},
+        "has_change_analysis": state.has_change_analysis,
+        "change_set": change_set_payload,
+        "rm_review_complete": rm_review_complete,
+    }
+
+
+def run_renewal_change_analysis(case_id: str) -> tuple[dict[str, Any], int]:
+    state = RENEWAL_STORE.get(case_id)
+    if state is None or not state.has_old_mb07:
+        return {
+            "status": "error",
+            "error_type": "OldMB07MissingError",
+            "message": "Vui lòng tải lên Tờ trình MB07 kỳ trước trước khi phân tích thay đổi.",
+        }, 400
+
+    case_data = CASES_DB.get(case_id)
+    if case_data is None:
+        return {"status": "error", "error_type": "CaseNotFoundError", "message": f"Không tìm thấy hồ sơ '{case_id}'."}, 404
+
+    new_snapshot = extract_new_canonical_snapshot(case_data)
+    change_set = build_change_set(case_id, state.old_baseline, new_snapshot)
+    RENEWAL_STORE.set_change_set(case_id, change_set)
+
+    return {
+        "status": "success",
+        "case_id": case_id,
+        "summary": change_set.summary,
+        "change_set": json.loads(change_set.model_dump_json()),
+    }, 200
+
+
+def resolve_renewal_change_item(
+    case_id: str,
+    canonical_path: str,
+    resolution: str,
+    edited_value: Optional[str] = None,
+    note: Optional[str] = None,
+) -> tuple[dict[str, Any], int]:
+    try:
+        resolution_enum = RMResolution(resolution)
+    except ValueError:
+        return {
+            "status": "error",
+            "error_type": "InvalidInputError",
+            "message": f"Giá trị resolution không hợp lệ: '{resolution}'.",
+        }, 400
+
+    try:
+        item = RENEWAL_STORE.resolve_change_item(case_id, canonical_path, resolution_enum, edited_value, note)
+        return {"status": "success", "item": json.loads(item.model_dump_json())}, 200
+    except RenewalItemNotFoundError as e:
+        return {"status": "error", "error_type": "RenewalItemNotFoundError", "message": str(e)}, 404
+
+
+# ==============================================================================
+# WORKSPACE: AI CREDIT CHALLENGE -- credit reviewer / devil's advocate, never an
+# approval model. Runs BEFORE MB07 generation, consumes the canonical layer.
+# ==============================================================================
+def run_ai_challenge(case_id: str) -> tuple[dict[str, Any], int]:
+    case_data = CASES_DB.get(case_id)
+    if case_data is None:
+        return {"status": "error", "error_type": "CaseNotFoundError", "message": f"Không tìm thấy hồ sơ '{case_id}'."}, 404
+
+    AI_CHALLENGE_STORE.mark_running(case_id)
+
+    renewal_state = RENEWAL_STORE.get(case_id)
+    renewal_change_set = renewal_state.change_set if renewal_state else None
+
+    challenge_set = AIChallengeEngine.generate(
+        case_id=case_id,
+        case_data=case_data,
+        renewal_change_set=renewal_change_set,
+        ai_client=True,
+    )
+    AI_CHALLENGE_STORE.set_challenge_set(case_id, challenge_set)
+
+    challenge_dump = json.loads(challenge_set.model_dump_json())
+    return {
+        "status": "success",
+        "case_id": case_id,
+        "summary": challenge_set.summary,
+        "progress": challenge_set.progress,
+        "items": challenge_dump["items"],
+        # Zero Silent Fallback metadata: deterministic items above are ALWAYS
+        # authoritative/valid regardless of these fields (see ai_challenge.engine).
+        "enrichment_status": challenge_dump["enrichment_status"],
+        "enrichment_warning": challenge_dump["enrichment_warning"],
+        "analyzer_warnings": challenge_dump["analyzer_warnings"],
+    }, 200
+
+
+def get_ai_challenge_state(case_id: str) -> dict[str, Any]:
+    state = AI_CHALLENGE_STORE.get(case_id)
+    if state is None or state.challenge_set is None:
+        return {
+            "status": "success",
+            "case_id": case_id,
+            "run_status": (state.run_status.value if state else "NOT_RUN"),
+            "summary": None,
+            "progress": None,
+            "items": [],
+            "enrichment_status": "NOT_REQUESTED",
+            "enrichment_warning": None,
+            "analyzer_warnings": [],
+        }
+    challenge_dump = json.loads(state.challenge_set.model_dump_json())
+    return {
+        "status": "success",
+        "case_id": case_id,
+        "run_status": state.run_status.value,
+        "summary": state.challenge_set.summary,
+        "progress": state.challenge_set.progress,
+        "items": challenge_dump["items"],
+        "enrichment_status": challenge_dump["enrichment_status"],
+        "enrichment_warning": challenge_dump["enrichment_warning"],
+        "analyzer_warnings": challenge_dump["analyzer_warnings"],
+    }
+
+
+def respond_to_ai_challenge(
+    case_id: str,
+    challenge_id: str,
+    rm_status: str,
+    rm_response: Optional[str] = None,
+) -> tuple[dict[str, Any], int]:
+    try:
+        status_enum = AIChallengeStatus(rm_status)
+    except ValueError:
+        return {
+            "status": "error",
+            "error_type": "InvalidInputError",
+            "message": f"Giá trị rm_status không hợp lệ: '{rm_status}'.",
+        }, 400
+
+    if status_enum == AIChallengeStatus.OPEN:
+        return {
+            "status": "error",
+            "error_type": "InvalidInputError",
+            "message": "Không thể đặt lại trạng thái về OPEN qua API phản hồi (chỉ ANSWERED hoặc NOT_APPLICABLE).",
+        }, 400
+
+    try:
+        item = AI_CHALLENGE_STORE.respond(case_id, challenge_id, status_enum, rm_response)
+        return {"status": "success", "item": json.loads(item.model_dump_json())}, 200
+    except ChallengeItemNotFoundError as e:
+        return {"status": "error", "error_type": "ChallengeItemNotFoundError", "message": str(e)}, 404
+
+
+def get_mb07_generation_provenance_context(case_id: str) -> dict[str, Any]:
+    """Ngữ cảnh phục vụ sinh MB07: tách biệt rõ SOURCE_FACT (canonical, có bằng
+    chứng tài liệu) và RM_EXPLANATION (giải trình của RM tại AI Challenge --
+    KHÔNG BAO GIỜ được biến thành SOURCE_FACT). Đây là điểm tích hợp CHỈ ĐỌC,
+    không tự động chỉnh sửa MB07 -- việc dùng ngữ cảnh này khi sinh narrative
+    vẫn phải đi qua kiến trúc kiểm soát/render hiện có."""
+    challenge_state = AI_CHALLENGE_STORE.get(case_id)
+    rm_explanations = []
+    if challenge_state is not None and challenge_state.challenge_set is not None:
+        rm_explanations = challenge_state.challenge_set.get_rm_explanations()
+
+    confirmed_changes = []
+    renewal_state = RENEWAL_STORE.get(case_id)
+    if renewal_state is not None and renewal_state.change_set is not None:
+        for item in renewal_state.change_set.items:
+            if item.rm_resolution != RMResolution.PENDING:
+                confirmed_changes.append({
+                    "canonical_path": item.canonical_path,
+                    "label": item.label,
+                    "resolution": item.rm_resolution.value,
+                    "value": item.rm_edited_value if item.rm_resolution == RMResolution.EDITED else (
+                        item.new_value if item.rm_resolution == RMResolution.ACCEPT_NEW else item.old_value
+                    ),
+                })
+
+    return {
+        "case_id": case_id,
+        "confirmed_renewal_changes": confirmed_changes,
+        "rm_explanations": rm_explanations,
+    }
 
 
 # ==============================================================================
@@ -1094,6 +1354,14 @@ HTML_PAGE = """<!DOCTYPE html>
         <button onclick="switchTab('tab-insights')" id="nav-tab-insights" class="nav-item" data-step="tab-insights">
           <span class="nav-item-step is-pending">○</span>
           <span class="nav-item-label">Thẩm định Tín dụng AI</span>
+        </button>
+        <button onclick="switchTab('tab-renewal')" id="nav-tab-renewal" class="nav-item" data-step="tab-renewal">
+          <span class="nav-item-step is-pending">○</span>
+          <span class="nav-item-label">Tái cấp</span>
+        </button>
+        <button onclick="switchTab('tab-ai-challenge')" id="nav-tab-ai-challenge" class="nav-item" data-step="tab-ai-challenge">
+          <span class="nav-item-step is-pending">○</span>
+          <span class="nav-item-label">AI Challenge</span>
         </button>
         <button onclick="switchTab('tab-narrative')" id="nav-tab-narrative" class="nav-item" data-step="tab-narrative">
           <span class="nav-item-step is-pending">○</span>
@@ -1661,6 +1929,69 @@ HTML_PAGE = """<!DOCTYPE html>
       </div>
     </section>
 
+    <!-- ========================================================================= -->
+    <!-- TAB: TÁI CẤP (RENEWAL)                                                     -->
+    <!-- ========================================================================= -->
+    <section id="tab-renewal" class="hidden space-y-4">
+      <div>
+        <h1 class="page-title">Tái cấp tín dụng</h1>
+        <p class="page-subtitle">So sánh hồ sơ kỳ trước với dữ liệu mới và cập nhật có kiểm soát.</p>
+      </div>
+
+      <!-- SECTION 1: HỒ SƠ KỲ TRƯỚC -->
+      <div class="panel p-5 space-y-3">
+        <h3 class="section-title">1. Hồ sơ kỳ trước</h3>
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div class="text-xs" id="renewal-old-mb07-status" style="color:var(--color-text-muted);">Chưa tải lên Tờ trình MB07 kỳ trước.</div>
+          <div class="flex-none">
+            <input type="file" id="file-old-mb07" accept=".docx" class="hidden" onchange="handleOldMB07Selected(this)">
+            <button onclick="document.getElementById('file-old-mb07').click()" class="btn btn-secondary btn-sm">Tải lên Tờ trình MB07 kỳ trước</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- SECTION 2: HỒ SƠ CẬP NHẬT (tái sử dụng luồng nạp tài liệu hiện có) -->
+      <div class="panel p-5 space-y-3">
+        <h3 class="section-title">2. Hồ sơ cập nhật</h3>
+        <p class="text-xs" style="color:var(--color-text-muted);">Nạp BCTC / CIC / Pháp lý / Kinh doanh mới tại tab "Không gian Tài liệu" -- trạng thái được đồng bộ tự động tại đây.</p>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs" id="renewal-new-docs-status">
+          <!-- rendered by renderRenewalWorkspace() -->
+        </div>
+      </div>
+
+      <!-- SECTION 3: PHÂN TÍCH THAY ĐỔI -->
+      <div class="panel p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="section-title">3. Phân tích thay đổi</h3>
+          <button onclick="analyzeRenewalChanges()" id="btn-renewal-analyze" class="btn btn-primary btn-sm" disabled>Phân tích thay đổi</button>
+        </div>
+        <div id="renewal-changeset-container">
+          <div class="text-xs p-6 text-center" style="color:var(--color-text-muted);">Chưa có phân tích thay đổi.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- TAB: AI CREDIT CHALLENGE                                                   -->
+    <!-- ========================================================================= -->
+    <section id="tab-ai-challenge" class="hidden space-y-4">
+      <div class="flex items-center justify-between flex-wrap gap-2">
+        <div>
+          <h1 class="page-title">AI Credit Challenge</h1>
+          <p class="page-subtitle">Rà soát và phản biện hồ sơ trước khi tạo tờ trình.</p>
+        </div>
+        <button onclick="runAIChallenge()" id="btn-run-challenge" class="btn btn-primary btn-sm">Chạy AI Challenge</button>
+      </div>
+
+      <div id="challenge-summary-container"></div>
+      <div id="challenge-progress-container"></div>
+      <div id="challenge-warnings-container" class="space-y-2"></div>
+
+      <div class="space-y-4" id="challenge-cards-container">
+        <div class="panel p-6 text-center text-xs" style="color:var(--color-text-muted);">Chưa có nội dung phản biện. Bấm "Chạy AI Challenge" để bắt đầu rà soát.</div>
+      </div>
+    </section>
+
       </main>
     </div>
   </div>
@@ -1803,7 +2134,7 @@ HTML_PAGE = """<!DOCTYPE html>
     };
 
     function switchTab(tabId) {
-      const tabs = ['tab-dashboard', 'tab-upload', 'tab-review', 'tab-insights', 'tab-narrative', 'tab-committee'];
+      const tabs = ['tab-dashboard', 'tab-upload', 'tab-review', 'tab-insights', 'tab-renewal', 'tab-ai-challenge', 'tab-narrative', 'tab-committee'];
       tabs.forEach(t => {
         const el = document.getElementById(t);
         const nav = document.getElementById('nav-' + t);
@@ -1822,6 +2153,12 @@ HTML_PAGE = """<!DOCTYPE html>
       }
       if (tabId === 'tab-narrative') {
         loadNarrativeState(CURRENT_CASE_ID);
+      }
+      if (tabId === 'tab-renewal') {
+        loadRenewalState(CURRENT_CASE_ID);
+      }
+      if (tabId === 'tab-ai-challenge') {
+        loadChallengeState(CURRENT_CASE_ID);
       }
       if (typeof updateSidebarProgress === 'function') updateSidebarProgress();
     }
@@ -3009,6 +3346,10 @@ HTML_PAGE = """<!DOCTYPE html>
       VISITED_TABS.clear();
       VISITED_TABS.add(CURRENT_ACTIVE_TAB);
       window.__MB07_EXPORTED__ = false;
+      // Never show the previous case's renewal/AI-challenge state while the
+      // new case's own state is being (re)loaded.
+      RENEWAL_STATE = null;
+      CHALLENGE_STATE = null;
       const resBox = document.getElementById('export-result');
       if (resBox) resBox.classList.add('hidden');
       const qaPanel = document.getElementById('qa-result-panel');
@@ -3028,6 +3369,8 @@ HTML_PAGE = """<!DOCTYPE html>
         await loadCaseData();
         if (CURRENT_ACTIVE_TAB === 'tab-committee') loadCommitteeCards();
         if (CURRENT_ACTIVE_TAB === 'tab-narrative') loadNarrativeState(cid);
+        if (CURRENT_ACTIVE_TAB === 'tab-renewal') loadRenewalState(cid);
+        if (CURRENT_ACTIVE_TAB === 'tab-ai-challenge') loadChallengeState(cid);
         updateSidebarProgress();
         alert(`⚡ Đã nạp lại dữ liệu demo chuẩn cho hồ sơ '${cid}'!`);
       } catch (e) {
@@ -3062,10 +3405,384 @@ HTML_PAGE = """<!DOCTYPE html>
           await loadCaseData();
           if (CURRENT_ACTIVE_TAB === 'tab-committee') loadCommitteeCards();
           if (CURRENT_ACTIVE_TAB === 'tab-narrative') loadNarrativeState(caseId);
+          if (CURRENT_ACTIVE_TAB === 'tab-renewal') loadRenewalState(caseId);
+          if (CURRENT_ACTIVE_TAB === 'tab-ai-challenge') loadChallengeState(caseId);
           updateSidebarProgress();
         }
       } catch (e) {
         console.error(e);
+      }
+    }
+
+    // =========================================================================
+    // TÁI CẤP (RENEWAL) WORKSPACE
+    // =========================================================================
+    async function loadRenewalState(caseId) {
+      try {
+        const res = await fetch(`/api/renewal/state?case_id=${encodeURIComponent(caseId)}`);
+        const data = await res.json();
+        if (data.case_id !== caseId) return; // stale response for a case we've since navigated away from
+        RENEWAL_STATE = data;
+        renderRenewalWorkspace();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderRenewalWorkspace() {
+      if (!RENEWAL_STATE) return;
+
+      const oldStatusEl = document.getElementById('renewal-old-mb07-status');
+      if (oldStatusEl) {
+        oldStatusEl.innerHTML = RENEWAL_STATE.has_old_mb07
+          ? `<span class="font-semibold" style="color:var(--color-success);">✓ Đã tải lên: ${escapeHtml(RENEWAL_STATE.old_mb07_filename)}</span> <span style="color:var(--color-text-muted);">(đã trích xuất baseline)</span>`
+          : 'Chưa tải lên Tờ trình MB07 kỳ trước.';
+      }
+
+      const docsEl = document.getElementById('renewal-new-docs-status');
+      if (docsEl) {
+        const docs = RENEWAL_STATE.new_documents || {};
+        const labels = { financial: 'BCTC', legal: 'Pháp lý', business: 'Kinh doanh', cic: 'CIC' };
+        docsEl.innerHTML = Object.keys(labels).map(k => `
+          <div class="p-2.5 rounded-md" style="border:1px solid var(--color-border); background:${docs[k] ? 'var(--color-success-bg)' : 'var(--color-bg)'};">
+            <div class="font-semibold" style="color:${docs[k] ? 'var(--color-success)' : 'var(--color-text-muted)'};">${docs[k] ? '✓' : '○'} ${labels[k]}</div>
+            <div class="text-[11px]" style="color:var(--color-text-muted);">${docs[k] ? 'Đã có dữ liệu' : 'Chưa có dữ liệu — nạp tại Không gian Tài liệu'}</div>
+          </div>
+        `).join('');
+      }
+
+      const btnAnalyze = document.getElementById('btn-renewal-analyze');
+      if (btnAnalyze) btnAnalyze.disabled = !RENEWAL_STATE.has_old_mb07;
+
+      renderRenewalChangeSet(RENEWAL_STATE.change_set);
+    }
+
+    const RENEWAL_STATUS_BADGE = {
+      UNCHANGED: '<span class="chip chip-success">Không thay đổi</span>',
+      CHANGED: '<span class="chip chip-warning">Thay đổi</span>',
+      NEW: '<span class="chip chip-info">Thông tin mới</span>',
+      REMOVED: '<span class="chip chip-danger">Không còn trong hồ sơ mới</span>',
+      CONFLICT: '<span class="chip chip-danger">Cần RM kiểm tra</span>',
+    };
+
+    function renderRenewalChangeSet(changeSet) {
+      const container = document.getElementById('renewal-changeset-container');
+      if (!container) return;
+
+      if (!changeSet || !Array.isArray(changeSet.items) || changeSet.items.length === 0) {
+        container.innerHTML = `<div class="text-xs p-6 text-center" style="color:var(--color-text-muted);">Chưa có phân tích thay đổi. Bấm "Phân tích thay đổi" sau khi đã có cả Tờ trình kỳ trước và dữ liệu mới.</div>`;
+        return;
+      }
+
+      const summary = { UNCHANGED: 0, CHANGED: 0, NEW: 0, REMOVED: 0, CONFLICT: 0 };
+      changeSet.items.forEach(it => { summary[it.status] = (summary[it.status] || 0) + 1; });
+
+      let html = `<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+        <div class="kpi-card"><div class="kpi-value" style="color:var(--color-warning);">${summary.CHANGED}</div><div class="kpi-label">Thay đổi</div></div>
+        <div class="kpi-card"><div class="kpi-value" style="color:var(--color-success);">${summary.UNCHANGED}</div><div class="kpi-label">Không thay đổi</div></div>
+        <div class="kpi-card"><div class="kpi-value" style="color:var(--color-primary);">${summary.NEW}</div><div class="kpi-label">Thông tin mới</div></div>
+        <div class="kpi-card"><div class="kpi-value" style="color:var(--color-danger);">${summary.CONFLICT}</div><div class="kpi-label">Xung đột</div></div>
+      </div>`;
+
+      html += `<div class="overflow-x-auto"><table class="w-full text-left border border-slate-200 rounded-lg text-xs">
+        <thead class="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+          <tr>
+            <th class="p-2">Nội dung</th>
+            <th class="p-2">Kỳ trước</th>
+            <th class="p-2">Hiện tại</th>
+            <th class="p-2">Trạng thái</th>
+            <th class="p-2">Xử lý RM</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-200 bg-white">`;
+
+      changeSet.items.forEach(item => {
+        if (item.status === 'UNCHANGED') {
+          html += `<tr>
+            <td class="p-2 font-semibold text-wrap-safe">${escapeHtml(item.label)}</td>
+            <td class="p-2 text-wrap-safe">${escapeHtml(item.old_value || '—')}</td>
+            <td class="p-2 text-wrap-safe">${escapeHtml(item.new_value || '—')}</td>
+            <td class="p-2">${RENEWAL_STATUS_BADGE[item.status] || item.status}</td>
+            <td class="p-2 text-[11px]" style="color:var(--color-text-muted);">Giữ nguyên nội dung tờ trình cũ</td>
+          </tr>`;
+          return;
+        }
+
+        const resolved = item.rm_resolution && item.rm_resolution !== 'PENDING';
+        const resolutionLabels = { ACCEPT_NEW: 'Đã chấp nhận', KEEP_OLD: 'Đã giữ nội dung cũ', EDITED: 'Đã chỉnh sửa' };
+        const actionsHtml = resolved
+          ? `<span class="chip chip-success">${escapeHtml(resolutionLabels[item.rm_resolution] || item.rm_resolution)}</span>`
+          : `<div class="flex flex-wrap gap-1">
+              <button onclick="resolveRenewalChange('${escapeHtml(item.canonical_path)}','ACCEPT_NEW')" class="btn btn-primary btn-sm" style="padding:2px 8px; font-size:11px;">Chấp nhận</button>
+              <button onclick="openEditRenewalChangeModal('${escapeHtml(item.canonical_path)}')" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:11px;">Chỉnh sửa</button>
+              <button onclick="resolveRenewalChange('${escapeHtml(item.canonical_path)}','KEEP_OLD')" class="btn btn-secondary btn-sm" style="padding:2px 8px; font-size:11px;">Giữ nội dung cũ</button>
+            </div>`;
+
+        let evidenceHtml = '';
+        if (item.new_evidence || item.new_page) {
+          evidenceHtml = `<div class="mt-1 text-[10px] italic" style="color:var(--color-text-muted);">Nguồn: ${escapeHtml(item.new_source || '')}${item.new_page ? ' — Trang ' + item.new_page : ''}${item.new_evidence ? ' · "' + escapeHtml(item.new_evidence) + '"' : ''}</div>`;
+        }
+
+        html += `<tr>
+          <td class="p-2 font-semibold text-wrap-safe">${escapeHtml(item.label)}</td>
+          <td class="p-2 text-wrap-safe">${escapeHtml(item.old_value || '—')}</td>
+          <td class="p-2 text-wrap-safe">${escapeHtml(item.new_value || '—')}${evidenceHtml}</td>
+          <td class="p-2">${RENEWAL_STATUS_BADGE[item.status] || item.status}</td>
+          <td class="p-2">${actionsHtml}</td>
+        </tr>`;
+      });
+
+      html += `</tbody></table></div>`;
+      container.innerHTML = html;
+    }
+
+    async function handleOldMB07Selected(inputEl) {
+      if (!inputEl.files || inputEl.files.length === 0) return;
+      const file = inputEl.files[0];
+      if (!file.name.toLowerCase().endsWith('.docx')) {
+        alert('❌ Chỉ chấp nhận tệp .docx cho Tờ trình MB07 kỳ trước.');
+        inputEl.value = '';
+        return;
+      }
+      const statusEl = document.getElementById('renewal-old-mb07-status');
+      if (statusEl) statusEl.innerHTML = 'Đang tải lên &amp; phân tích...';
+      try {
+        const b64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const res = reader.result;
+            resolve(typeof res === 'string' && res.includes(',') ? res.split(',')[1] : res);
+          };
+          reader.onerror = (e) => reject(new Error('Lỗi đọc tệp: ' + e.message));
+          reader.readAsDataURL(file);
+        });
+        const res = await fetch('/api/renewal/upload_old_mb07', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, content_base64: b64, case_id: CURRENT_CASE_ID })
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') {
+          throw new Error(data.message || 'Lỗi tải lên MB07 kỳ trước.');
+        }
+        await loadRenewalState(CURRENT_CASE_ID);
+      } catch (e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--color-danger);">${escapeHtml(e.message)}</span>`;
+      } finally {
+        inputEl.value = '';
+      }
+    }
+
+    async function analyzeRenewalChanges() {
+      const btn = document.getElementById('btn-renewal-analyze');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch('/api/renewal/analyze_changes', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ case_id: CURRENT_CASE_ID })
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Lỗi phân tích thay đổi.');
+        await loadRenewalState(CURRENT_CASE_ID);
+      } catch (e) {
+        alert('❌ ' + e.message);
+      } finally {
+        if (btn) btn.disabled = !(RENEWAL_STATE && RENEWAL_STATE.has_old_mb07);
+      }
+    }
+
+    async function resolveRenewalChange(canonicalPath, resolution, editedValue) {
+      try {
+        const res = await fetch('/api/renewal/resolve_change', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ case_id: CURRENT_CASE_ID, canonical_path: canonicalPath, resolution, edited_value: editedValue || null })
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Lỗi cập nhật xử lý thay đổi.');
+        await loadRenewalState(CURRENT_CASE_ID);
+        updateSidebarProgress();
+      } catch (e) {
+        alert('❌ ' + e.message);
+      }
+    }
+
+    function openEditRenewalChangeModal(canonicalPath) {
+      const val = prompt('Nhập giá trị RM chỉnh sửa để thay thế:');
+      if (val === null) return;
+      resolveRenewalChange(canonicalPath, 'EDITED', val);
+    }
+
+    // =========================================================================
+    // AI CREDIT CHALLENGE WORKSPACE
+    // =========================================================================
+    async function loadChallengeState(caseId) {
+      try {
+        const res = await fetch(`/api/ai_challenge/state?case_id=${encodeURIComponent(caseId)}`);
+        const data = await res.json();
+        if (data.case_id !== caseId) return; // stale response for a case we've since navigated away from
+        CHALLENGE_STATE = data;
+        renderChallengeWorkspace();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    function renderChallengeWorkspace() {
+      if (!CHALLENGE_STATE) return;
+
+      const summaryEl = document.getElementById('challenge-summary-container');
+      if (summaryEl) {
+        const s = CHALLENGE_STATE.summary;
+        summaryEl.innerHTML = !s ? '' : `<div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div class="kpi-card"><div class="kpi-value">${s.total}</div><div class="kpi-label">Điểm cần xem xét</div></div>
+          <div class="kpi-card"><div class="kpi-value">${s.FINANCIAL}</div><div class="kpi-label">Tài chính</div></div>
+          <div class="kpi-card"><div class="kpi-value">${s.BUSINESS}</div><div class="kpi-label">Kinh doanh</div></div>
+          <div class="kpi-card"><div class="kpi-value">${s.CREDIT}</div><div class="kpi-label">Tín dụng / CIC</div></div>
+          <div class="kpi-card"><div class="kpi-value">${s.DATA_CONSISTENCY + s.RENEWAL}</div><div class="kpi-label">Dữ liệu</div></div>
+        </div>`;
+      }
+
+      const progressEl = document.getElementById('challenge-progress-container');
+      if (progressEl) {
+        const p = CHALLENGE_STATE.progress;
+        progressEl.innerHTML = p ? `<div class="text-xs font-semibold" style="color:var(--color-text-muted);">${p.resolved} / ${p.total} nội dung đã được RM xử lý</div>` : '';
+      }
+
+      renderChallengeWarnings();
+      renderChallengeCards(CHALLENGE_STATE.items || []);
+    }
+
+    // Zero Silent Fallback UI: deterministic challenge content above is always
+    // authoritative/valid. These are non-blocking inline notices only -- never
+    // alert(), never prevent RM from reviewing the (valid) cards below.
+    function renderChallengeWarnings() {
+      const container = document.getElementById('challenge-warnings-container');
+      if (!container) return;
+
+      let html = '';
+
+      const enrichmentStatus = CHALLENGE_STATE.enrichment_status;
+      if (enrichmentStatus === 'PARTIAL' || enrichmentStatus === 'FAILED') {
+        const msg = CHALLENGE_STATE.enrichment_warning
+          || 'AI Challenge đã được tạo bằng bộ quy tắc kiểm soát. Bước tinh chỉnh ngôn ngữ AI không hoàn tất.';
+        html += `
+          <div class="p-2.5 rounded-md text-xs" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
+            <span class="font-semibold" style="color:var(--color-warning);">⚠ </span>${escapeHtml(msg)}
+          </div>
+        `;
+      }
+
+      const analyzerWarnings = CHALLENGE_STATE.analyzer_warnings || [];
+      if (analyzerWarnings.length > 0) {
+        html += `
+          <div class="p-2.5 rounded-md text-xs" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
+            <span class="font-semibold" style="color:var(--color-warning);">⚠ </span>Một số chỉ tiêu không thể tính toán tự động. Vui lòng kiểm tra dữ liệu đầu vào.
+          </div>
+        `;
+      }
+
+      container.innerHTML = html;
+    }
+
+    const CHALLENGE_CATEGORY_LABELS = { FINANCIAL: 'TÀI CHÍNH', BUSINESS: 'KINH DOANH', CREDIT: 'TÍN DỤNG / CIC', DATA_CONSISTENCY: 'DỮ LIỆU', RENEWAL: 'TÁI CẤP' };
+    const CHALLENGE_STATUS_LABELS = { OPEN: 'Chưa xử lý', ANSWERED: 'Đã giải trình', NOT_APPLICABLE: 'Không áp dụng' };
+    const CHALLENGE_SEVERITY_CHIP = { HIGH: 'chip-danger', MEDIUM: 'chip-warning', LOW: 'chip-neutral' };
+
+    function renderChallengeCards(items) {
+      const container = document.getElementById('challenge-cards-container');
+      if (!container) return;
+
+      if (items.length === 0) {
+        container.innerHTML = `<div class="panel p-6 text-center text-xs" style="color:var(--color-text-muted);">Chưa có nội dung phản biện. Bấm "Chạy AI Challenge" để bắt đầu rà soát.</div>`;
+        return;
+      }
+
+      let html = '';
+      items.forEach(item => {
+        const factsHtml = (item.facts_used || []).map(f => `
+          <div class="text-[11px]" style="color:var(--color-text-muted);">
+            <span class="font-semibold" style="color:var(--color-text);">${escapeHtml(f.value)}</span>
+            — Nguồn: ${escapeHtml(f.source)}${f.page ? ' — Trang ' + f.page : ''}
+            ${f.evidence ? `<div class="italic mt-0.5 text-wrap-safe">"${escapeHtml(f.evidence)}"</div>` : ''}
+          </div>
+        `).join('');
+
+        const isResolved = item.rm_status !== 'OPEN';
+        const responseBlock = isResolved
+          ? `<div class="p-2.5 rounded-md text-xs text-wrap-safe" style="background:var(--color-success-bg); border:1px solid var(--color-success-border);">
+               <span class="font-semibold" style="color:var(--color-success);">${escapeHtml(CHALLENGE_STATUS_LABELS[item.rm_status] || item.rm_status)}:</span>
+               ${escapeHtml(item.rm_response || '')}
+             </div>`
+          : `<div class="space-y-1.5">
+               <textarea id="challenge-response-${item.id}" rows="2" placeholder="RM trả lời..." class="w-full p-2 text-xs rounded-lg" style="border:1px solid var(--color-border-strong);"></textarea>
+               <div class="flex gap-2">
+                 <button onclick="respondToChallenge('${item.id}','ANSWERED')" class="btn btn-primary btn-sm">Đã giải trình</button>
+                 <button onclick="respondToChallenge('${item.id}','NOT_APPLICABLE')" class="btn btn-secondary btn-sm">Không áp dụng</button>
+               </div>
+             </div>`;
+
+        html += `
+          <div class="panel p-5 space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                <span class="chip ${CHALLENGE_SEVERITY_CHIP[item.severity] || 'chip-neutral'}">${escapeHtml(item.severity)}</span>
+                <span class="text-xs font-semibold uppercase tracking-wide" style="color:var(--color-text-muted);">${CHALLENGE_CATEGORY_LABELS[item.category] || item.category}</span>
+              </div>
+              <span class="chip ${item.rm_status === 'OPEN' ? 'chip-warning' : 'chip-success'}">${escapeHtml(CHALLENGE_STATUS_LABELS[item.rm_status] || item.rm_status)}</span>
+            </div>
+            <h4 class="text-sm font-semibold text-wrap-safe" style="color:var(--color-primary);">${escapeHtml(item.title)}</h4>
+            <div class="text-xs space-y-2">
+              <div class="text-wrap-safe"><span class="font-semibold" style="color:var(--color-text);">Quan sát của AI:</span> ${escapeHtml(item.observation)}</div>
+              <div class="text-wrap-safe"><span class="font-semibold" style="color:var(--color-text);">Giả thuyết cần làm rõ:</span> ${escapeHtml(item.risk_hypothesis)}</div>
+              ${factsHtml ? `<div class="p-2 rounded-md" style="background:var(--color-bg); border:1px solid var(--color-border);">${factsHtml}</div>` : ''}
+              <div class="p-2.5 rounded-md text-wrap-safe" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
+                <span class="font-semibold" style="color:var(--color-warning);">Câu hỏi cho RM:</span> ${escapeHtml(item.question)}
+              </div>
+            </div>
+            ${responseBlock}
+          </div>
+        `;
+      });
+      container.innerHTML = html;
+    }
+
+    async function runAIChallenge() {
+      const btn = document.getElementById('btn-run-challenge');
+      if (btn) { btn.disabled = true; btn.innerText = 'Đang chạy AI Challenge...'; }
+      try {
+        const res = await fetch('/api/ai_challenge/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ case_id: CURRENT_CASE_ID })
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Lỗi chạy AI Challenge.');
+        await loadChallengeState(CURRENT_CASE_ID);
+        updateSidebarProgress();
+      } catch (e) {
+        alert('❌ ' + e.message);
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = 'Chạy AI Challenge'; }
+      }
+    }
+
+    async function respondToChallenge(challengeId, rmStatus) {
+      const textarea = document.getElementById('challenge-response-' + challengeId);
+      const rmResponse = textarea ? textarea.value : '';
+      try {
+        const res = await fetch('/api/ai_challenge/respond', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ case_id: CURRENT_CASE_ID, challenge_id: challengeId, rm_status: rmStatus, rm_response: rmResponse })
+        });
+        const data = await res.json();
+        if (!res.ok || data.status !== 'success') throw new Error(data.message || 'Lỗi lưu phản hồi.');
+        await loadChallengeState(CURRENT_CASE_ID);
+        updateSidebarProgress();
+      } catch (e) {
+        alert('❌ ' + e.message);
       }
     }
 
@@ -3125,6 +3842,12 @@ HTML_PAGE = """<!DOCTYPE html>
       verifiedInsights: [],
       error: null
     };
+
+    // Tái cấp (renewal) and AI Challenge workspace state -- ALWAYS reloaded
+    // fresh per case_id (see loadRenewalState/loadChallengeState); never
+    // carried over from a previously-viewed case.
+    let RENEWAL_STATE = null;
+    let CHALLENGE_STATE = null;
 
     let EDITING_BLOCK_TARGET = null;
     let EDITING_BLOCK_ORIGINAL_TEXT = null;
@@ -3618,6 +4341,9 @@ HTML_PAGE = """<!DOCTYPE html>
         'tab-upload': allDocsConfirmed,
         'tab-review': SECTION_A_SAVED && SECTION_B_SAVED,
         'tab-insights': VISITED_TABS.has('tab-insights'),
+        'tab-renewal': !!(RENEWAL_STATE && RENEWAL_STATE.rm_review_complete),
+        'tab-ai-challenge': !!(CHALLENGE_STATE && CHALLENGE_STATE.summary && CHALLENGE_STATE.progress
+          && CHALLENGE_STATE.progress.total > 0 && CHALLENGE_STATE.progress.resolved === CHALLENGE_STATE.progress.total),
         'tab-narrative': NARRATIVE_STATE.status === 'ACCEPTED',
         'tab-committee': !!window.__MB07_EXPORTED__,
       };
@@ -5466,6 +6192,24 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
             })
             return
 
+        if path == '/api/renewal/state' or path.startswith('/api/renewal/state'):
+            cid = ACTIVE_CASE_ID
+            if '?' in self.path:
+                params = urllib.parse.parse_qs(self.path.split('?', 1)[1])
+                if 'case_id' in params:
+                    cid = params['case_id'][0]
+            self._send_json(get_renewal_state(cid))
+            return
+
+        if path == '/api/ai_challenge/state' or path.startswith('/api/ai_challenge/state'):
+            cid = ACTIVE_CASE_ID
+            if '?' in self.path:
+                params = urllib.parse.parse_qs(self.path.split('?', 1)[1])
+                if 'case_id' in params:
+                    cid = params['case_id'][0]
+            self._send_json(get_ai_challenge_state(cid))
+            return
+
         if path == '/api/insights' or path.startswith('/api/insights'):
             cid = ACTIVE_CASE_ID
             if '?' in self.path:
@@ -5686,6 +6430,12 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
             if cid in CASES_DB:
                 if "_committee_notes" in CASES_DB[cid]:
                     del CASES_DB[cid]["_committee_notes"]
+                # Resetting a case back to its baked-in demo baseline also
+                # clears ITS OWN (and only its own) renewal/AI-challenge
+                # workspace state -- otherwise a reset case would keep showing
+                # a stale change analysis/challenge set from before the reset.
+                RENEWAL_STORE.clear_case(cid)
+                AI_CHALLENGE_STORE.clear_case(cid)
                 ACTIVE_CASE_ID = cid
                 self._send_json({"status": "success", "message": f"Hồ sơ demo '{cid}' đã được đặt lại trạng thái chuẩn.", "active_case": cid})
             else:
@@ -5699,6 +6449,116 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 self._send_json({"status": "success", "active_case": cid})
             else:
                 self._send_json({"status": "error", "message": "Case not found"}, status_code=404)
+            return
+
+        if path == '/api/renewal/upload_old_mb07':
+            if "file_path" in body_json:
+                self._send_json({
+                    "status": "error",
+                    "error_type": "InvalidInputError",
+                    "message": "Đường dẫn file vật lý từ client không được chấp nhận."
+                }, status_code=400)
+                return
+
+            fname = body_json.get("filename")
+            b64content = body_json.get("content_base64")
+            if not fname or not isinstance(fname, str):
+                self._send_json({
+                    "status": "error",
+                    "error_type": "InvalidInputError",
+                    "message": "Tên tệp MB07 kỳ trước không hợp lệ hoặc bị thiếu."
+                }, status_code=400)
+                return
+            if not fname.lower().endswith(".docx"):
+                self._send_json({
+                    "status": "error",
+                    "error_type": "InvalidFormatError",
+                    "message": "Chỉ chấp nhận tệp MB07 kỳ trước định dạng .docx."
+                }, status_code=400)
+                return
+            if not b64content or not isinstance(b64content, str):
+                self._send_json({
+                    "status": "error",
+                    "error_type": "InvalidInputError",
+                    "message": "Nội dung tệp base64 không hợp lệ hoặc bị thiếu."
+                }, status_code=400)
+                return
+            try:
+                raw_bytes = base64.b64decode(b64content, validate=True)
+            except Exception:
+                self._send_json({
+                    "status": "error",
+                    "error_type": "InvalidBase64Error",
+                    "message": "Dữ liệu base64 của tệp bị hỏng hoặc không đúng định dạng."
+                }, status_code=400)
+                return
+            if len(raw_bytes) == 0:
+                self._send_json({
+                    "status": "error",
+                    "error_type": "EmptyFileError",
+                    "message": "Tệp MB07 kỳ trước tải lên có kích thước rỗng (0 bytes)."
+                }, status_code=400)
+                return
+            if len(raw_bytes) > MAX_OLD_MB07_UPLOAD_SIZE:
+                self._send_json({
+                    "status": "error",
+                    "error_type": "FileTooLargeError",
+                    "message": f"Dung lượng tệp vượt quá giới hạn ({MAX_OLD_MB07_UPLOAD_SIZE // (1024*1024)}MB)."
+                }, status_code=400)
+                return
+
+            target_cid = body_json.get("case_id") or ACTIVE_CASE_ID
+            res_payload, status_code = process_old_mb07_upload(raw_bytes, os.path.basename(fname), target_cid)
+            self._send_json(res_payload, status_code=status_code)
+            return
+
+        if path == '/api/renewal/analyze_changes':
+            target_cid = body_json.get("case_id") or ACTIVE_CASE_ID
+            res_payload, status_code = run_renewal_change_analysis(target_cid)
+            self._send_json(res_payload, status_code=status_code)
+            return
+
+        if path == '/api/renewal/resolve_change':
+            target_cid = body_json.get("case_id") or ACTIVE_CASE_ID
+            canonical_path = body_json.get("canonical_path")
+            resolution = body_json.get("resolution")
+            if not canonical_path or not resolution:
+                self._send_json({
+                    "status": "error",
+                    "error_type": "InvalidInputError",
+                    "message": "Thiếu 'canonical_path' hoặc 'resolution'."
+                }, status_code=400)
+                return
+            res_payload, status_code = resolve_renewal_change_item(
+                target_cid, canonical_path, resolution,
+                edited_value=body_json.get("edited_value"),
+                note=body_json.get("note"),
+            )
+            self._send_json(res_payload, status_code=status_code)
+            return
+
+        if path == '/api/ai_challenge/run':
+            target_cid = body_json.get("case_id") or ACTIVE_CASE_ID
+            res_payload, status_code = run_ai_challenge(target_cid)
+            self._send_json(res_payload, status_code=status_code)
+            return
+
+        if path == '/api/ai_challenge/respond':
+            target_cid = body_json.get("case_id") or ACTIVE_CASE_ID
+            challenge_id = body_json.get("challenge_id")
+            rm_status = body_json.get("rm_status")
+            if not challenge_id or not rm_status:
+                self._send_json({
+                    "status": "error",
+                    "error_type": "InvalidInputError",
+                    "message": "Thiếu 'challenge_id' hoặc 'rm_status'."
+                }, status_code=400)
+                return
+            res_payload, status_code = respond_to_ai_challenge(
+                target_cid, challenge_id, rm_status,
+                rm_response=body_json.get("rm_response"),
+            )
+            self._send_json(res_payload, status_code=status_code)
             return
 
         if path == '/api/preview_legal_pdf':
