@@ -16,7 +16,7 @@ import json
 import pytest
 import pypdf
 import pypdfium2 as pdfium
-from typing import List, Optional
+from typing import Dict, List, Optional
 from unittest.mock import patch, MagicMock
 
 from msb_eb_copilot.src.ingestion.pdf_ocr import (
@@ -43,6 +43,8 @@ from msb_eb_copilot.src.ingestion.pdf_ocr import (
     _parse_retry_after_seconds,
     _parse_resets_in_seconds,
     DEFAULT_OCR_RPM_LIMIT,
+    OCR_MAX_CONTENT_ATTEMPTS,
+    _classify_ocr_text,
 )
 from msb_eb_copilot.src.extraction.legal_extraction import (
     LegalDocumentExtractor,
@@ -705,6 +707,212 @@ def test_compute_rate_limit_wait_seconds_priority_and_fallback():
     assert wait2 == pytest.approx(4.0)
     wait3, _ = _compute_rate_limit_wait_seconds(err_no_hint, attempt=3)
     assert wait3 == pytest.approx(8.0)
+
+
+# ==============================================================================
+# 2d. OCR CONTENT-EMPTY RETRY (page-level, separate from the 429 retry above)
+# ==============================================================================
+class SequentialMockOCREngine(BaseOCREngine):
+    """Returns a pre-scripted sequence of raw OCR results per page_num, one per
+    call, so tests can simulate 'first attempt garbage, later attempt good text'
+    without any real network or rate-limit machinery. Raises loudly if called
+    more times than the test scripted -- this is what would catch an accidental
+    uncontrolled/unbounded retry loop."""
+
+    provider_name = "mock_engine"
+    model = "mock-vision-model"
+
+    def __init__(self, sequences: Dict[int, List[Optional[str]]] = None):
+        self.sequences = {k: list(v) for k, v in (sequences or {}).items()}
+        self.call_log: List[int] = []
+
+    def ocr_page(self, base64_png: str, page_num: int) -> str:
+        self.call_log.append(page_num)
+        queue = self.sequences.get(page_num)
+        if queue is None:
+            return f"Nội dung văn bản trang {page_num} với số liệu 2024"
+        if not queue:
+            raise AssertionError(
+                f"ocr_page(page_num={page_num}) called more times than the test "
+                f"scripted responses for -- possible unbounded retry loop"
+            )
+        return queue.pop(0)
+
+
+def test_content_retry_first_empty_then_valid_succeeds():
+    """A. First OCR result empty string, second call returns valid text -> succeeds,
+    same page retried (not the whole PDF), exactly 2 engine calls."""
+    engine = SequentialMockOCREngine({1: ["", "Nội dung hợp lệ trang 1 với số liệu 12345"]})
+    result = PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+    assert result.text == "Nội dung hợp lệ trang 1 với số liệu 12345"
+    assert engine.call_log == [1, 1]
+
+
+def test_content_retry_none_then_valid_succeeds():
+    """B. First OCR result None, second call returns valid text -> succeeds."""
+    engine = SequentialMockOCREngine({1: [None, "Nội dung hợp lệ số 2 với ký tự 999"]})
+    result = PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+    assert result.text == "Nội dung hợp lệ số 2 với ký tự 999"
+    assert engine.call_log == [1, 1]
+
+
+def test_content_retry_punctuation_only_then_valid_succeeds():
+    """C. First OCR result punctuation-only (no alnum), second call valid -> succeeds."""
+    engine = SequentialMockOCREngine({1: ["--- === *** !!!", "Nội dung hợp lệ số 3 (ABC123)"]})
+    result = PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+    assert result.text == "Nội dung hợp lệ số 3 (ABC123)"
+    assert engine.call_log == [1, 1]
+
+
+def test_content_retry_three_consecutive_empty_raises_ocr_no_text_error():
+    """D. 3 consecutive empty results -> OCRNoTextError, exactly 3 attempts (bounded,
+    not more)."""
+    engine = SequentialMockOCREngine({1: ["", "", ""]})
+    with pytest.raises(OCRNoTextError, match="có nội dung OCR hoàn toàn rỗng"):
+        PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+    assert engine.call_log == [1, 1, 1]
+
+
+def test_content_retry_three_consecutive_none_raises_ocr_no_text_error():
+    engine = SequentialMockOCREngine({1: [None, None, None]})
+    with pytest.raises(OCRNoTextError, match="không nhận được kết quả OCR"):
+        PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+    assert engine.call_log == [1, 1, 1]
+
+
+def test_content_retry_three_consecutive_non_alnum_raises_ocr_no_text_error():
+    engine = SequentialMockOCREngine({1: ["---", "***", "==="]})
+    with pytest.raises(OCRNoTextError, match="không chứa bất kỳ ký tự chữ hoặc số"):
+        PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+    assert engine.call_log == [1, 1, 1]
+
+
+def test_content_retry_logs_warning_on_each_retry_but_not_on_final_exhaustion(caplog):
+    engine = SequentialMockOCREngine({1: ["", "", ""]})
+    with caplog.at_level(logging.WARNING, logger="msb_eb_copilot.src.ingestion.pdf_ocr"):
+        with pytest.raises(OCRNoTextError):
+            PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+
+    warning_lines = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warning_lines) == 2  # only before attempts 2 and 3 -- not after the 3rd (final) failure
+    for rec in warning_lines:
+        msg = rec.getMessage()
+        assert "OCR returned empty content page=1" in msg
+        assert "model=mock-vision-model" in msg
+        assert "retrying same page" in msg
+    assert "attempt=1/3" in warning_lines[0].getMessage()
+    assert "attempt=2/3" in warning_lines[1].getMessage()
+
+
+def test_no_page_skipping_on_content_exhaustion_multi_page_document():
+    """G. A page that never produces valid text after all retries must fail the
+    whole extraction loudly -- it must never be silently skipped/omitted so the
+    document ends up with fewer pages than it physically has."""
+    engine = SequentialMockOCREngine({1: ["", "", ""]})  # page 2 uses the default valid fallback
+    with pytest.raises(OCRNoTextError):
+        PDFOCRIngestor.extract_document(SCANNED_FIXTURE_PDF, engine=engine, max_workers=1)
+    # Page 1 was retried the full bounded amount -- not given up on after 1 try,
+    # and not silently replaced with empty/placeholder text.
+    assert engine.call_log.count(1) == 3
+
+
+def test_content_retry_respects_shared_rate_limiter():
+    """E. Every content-retry attempt is a full ocr_page() call, so each one must
+    still go through the engine's proactive rate limiter exactly once per attempt."""
+    mock_limiter = MagicMock()
+    mock_limiter.enabled = True
+    engine = QwenVisionOCREngine(api_key=FAKE_API_KEY, rate_limiter=mock_limiter, sleep_fn=MagicMock())
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[_make_success_response(""), _make_success_response("Nội dung hợp lệ 123")],
+    ) as mock_create:
+        result = PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+
+    assert result.text == "Nội dung hợp lệ 123"
+    assert mock_create.call_count == 2
+    assert mock_limiter.acquire.call_count == 2  # once per content attempt
+
+
+def test_content_retry_combined_with_429_retry_stays_bounded():
+    """F. Content retry (max 3) composes with the independent 429 retry (max 4 per
+    call) without creating an uncontrolled 4x3 explosion: content-attempt 1 needs
+    one internal 429 retry (2 raw API calls) and still comes back empty; content-attempt
+    2 succeeds immediately (1 raw API call). Total raw API calls = 3, well under the
+    3 x 4 = 12 documented worst-case ceiling."""
+    err_429 = _make_status_error(
+        _openai_pkg.RateLimitError, 429, "model rpm limit exceeded (5/5), resets in 1s",
+        headers={"Retry-After": "1"},
+    )
+    sleep_mock = MagicMock()
+    engine = QwenVisionOCREngine(
+        api_key=FAKE_API_KEY,
+        rate_limiter=OCRRateLimiter(rpm_limit=999999, enabled=False),
+        sleep_fn=sleep_mock,
+    )
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[
+            err_429,                                  # content-attempt 1, API try 1: 429
+            _make_success_response(""),                # content-attempt 1, API try 2: empty text
+            _make_success_response("Nội dung hợp lệ cuối cùng"),  # content-attempt 2: valid
+        ],
+    ) as mock_create:
+        result = PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+
+    assert result.text == "Nội dung hợp lệ cuối cùng"
+    assert mock_create.call_count == 3
+    assert sleep_mock.call_count == 1  # exactly one 429 wait, from content-attempt 1
+
+
+def test_content_retry_logging_never_leaks_secrets_base64_or_document_content(caplog):
+    """H. The content-retry warning log line only ever contains page_num/model/attempt
+    -- never the base64 image, never OCR'd document content, never any secret."""
+    class LeakyEngine(BaseOCREngine):
+        provider_name = "mock_engine"
+        model = "qwen/qwen3.6-flash"
+
+        def __init__(self):
+            self.calls = 0
+            self.last_base64_seen: Optional[str] = None
+
+        def ocr_page(self, base64_png: str, page_num: int) -> str:
+            self.last_base64_seen = base64_png
+            self.calls += 1
+            if self.calls == 1:
+                return ""  # invalid -- triggers the retry-warning log path
+            # Deliberately contrived: even if actual OCR'd content contained
+            # something secret-looking, our log format never includes content.
+            return f"Văn bản tài liệu hợp lệ, số liệu tài chính, key={FAKE_API_KEY}"
+
+    engine = LeakyEngine()
+    with caplog.at_level(logging.WARNING, logger="msb_eb_copilot.src.ingestion.pdf_ocr"):
+        result = PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+
+    assert FAKE_API_KEY in result.text  # sanity: the contrived secret IS in the OCR'd text/output itself
+    assert engine.last_base64_seen  # the real rasterized image was passed through as usual
+
+    log_text = caplog.text
+    assert "OCR returned empty content page=1" in log_text
+    assert FAKE_API_KEY not in log_text
+    assert engine.last_base64_seen not in log_text
+    assert "Authorization" not in log_text
+    assert "Văn bản tài liệu hợp lệ" not in log_text
+
+
+def test_classify_ocr_text_direct_unit_contract():
+    assert _classify_ocr_text(None) == (False, None, "none")
+    assert _classify_ocr_text("   \n\t  ") == (False, "", "empty")
+    assert _classify_ocr_text("--- === ***") == (False, "--- === ***", "non_alnum")
+    is_valid, norm, kind = _classify_ocr_text("Có số 123")
+    assert is_valid is True
+    assert norm == "Có số 123"
+    assert kind is None
+
+
+def test_ocr_max_content_attempts_is_3():
+    assert OCR_MAX_CONTENT_ATTEMPTS == 3
 
 
 # ==============================================================================

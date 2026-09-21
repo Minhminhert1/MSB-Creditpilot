@@ -378,6 +378,57 @@ def _compute_rate_limit_wait_seconds(exc: BaseException, attempt: int) -> Tuple[
 
 
 # ==============================================================================
+# 2d. OCR CONTENT-EMPTY RETRY (page-level, independent of the 429 retry above)
+# ==============================================================================
+# Confirmed production case: a physical page with substantial real text can still
+# come back from the Vision model as None/empty/no-alnum-content on a given call
+# (a transient model-side failure, not a genuinely blank page). This is a SEPARATE
+# retry axis from the 429 handling inside QwenVisionOCREngine.ocr_page:
+#   - The 429 retry loop retries a single API call up to 4 times when the
+#     transport/HTTP layer says "rate limited" -- it never inspects OCR content.
+#   - This content retry loop retries the whole ocr_page() call (i.e. a fresh API
+#     request, itself internally allowed its own up to 4 attempts against 429) up
+#     to 3 times when the HTTP call succeeded but the returned text is unusable.
+# These two axes multiply, not add, in the worst case: with a content-attempt
+# cap of 3 and a 429-attempt cap of 4, the hard ceiling is 3 x 4 = 12 real API
+# calls to GreenNode for a single page, only reached if every single one of those
+# 12 calls is itself rate-limited. In the common case (no 429s) it is exactly 3.
+OCR_MAX_CONTENT_ATTEMPTS = 3
+
+
+def _classify_ocr_text(raw_text: Optional[str]) -> Tuple[bool, Optional[str], Optional[str]]:
+    """Applies the existing OCR text validation rules and reports which one (if
+    any) failed, WITHOUT raising -- so the caller can decide to retry instead.
+
+    Returns (is_valid, normalized_text, failure_kind), where failure_kind is one
+    of "none", "empty", "non_alnum" when is_valid is False.
+    """
+    if raw_text is None:
+        return False, None, "none"
+
+    norm_text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip("\n\r\t ")
+
+    if not norm_text:
+        return False, norm_text, "empty"
+
+    if not any(ch.isalnum() for ch in norm_text):
+        return False, norm_text, "non_alnum"
+
+    return True, norm_text, None
+
+
+def _raise_ocr_no_text_error(page_num: int, failure_kind: Optional[str]) -> None:
+    """Raises the exact same OCRNoTextError message the old (non-retrying) code
+    raised for each condition -- preserved verbatim so error text/matching in
+    downstream code and existing tests is unaffected."""
+    if failure_kind == "none":
+        raise OCRNoTextError(f"Trang {page_num} không nhận được kết quả OCR từ engine.")
+    if failure_kind == "empty":
+        raise OCRNoTextError(f"Trang {page_num} có nội dung OCR hoàn toàn rỗng.")
+    raise OCRNoTextError(f"Trang {page_num} không chứa bất kỳ ký tự chữ hoặc số Unicode nào.")
+
+
+# ==============================================================================
 # 3. BASE OCR ENGINE & QWEN VISION ADAPTER
 # ==============================================================================
 class BaseOCREngine(ABC):
@@ -711,20 +762,26 @@ class PDFOCRIngestor:
             del pil_img
             del buf
 
-        # Gọi OCR Engine cho đúng 1 trang vật lý
-        raw_text = active_engine.ocr_page(b64_png, page_num=page_num)
-
-        # Kiểm định văn bản OCR tất định (Strict validation)
-        if raw_text is None:
-            raise OCRNoTextError(f"Trang {page_num} không nhận được kết quả OCR từ engine.")
-
-        norm_text = raw_text.replace("\r\n", "\n").replace("\r", "\n").strip("\n\r\t ")
-
-        if not norm_text:
-            raise OCRNoTextError(f"Trang {page_num} có nội dung OCR hoàn toàn rỗng.")
-
-        if not any(ch.isalnum() for ch in norm_text):
-            raise OCRNoTextError(f"Trang {page_num} không chứa bất kỳ ký tự chữ hoặc số Unicode nào.")
+        # Gọi OCR Engine cho đúng 1 trang vật lý, với retry giới hạn ở cấp nội dung
+        # (content-empty/None/non-alnum) -- HOÀN TOÀN TÁCH BIỆT với retry 429 đã
+        # có sẵn bên trong active_engine.ocr_page(). Xem mục "2d." phía trên.
+        norm_text: Optional[str] = None
+        failure_kind: Optional[str] = None
+        for content_attempt in range(1, OCR_MAX_CONTENT_ATTEMPTS + 1):
+            raw_text = active_engine.ocr_page(b64_png, page_num=page_num)
+            is_valid, norm_text, failure_kind = _classify_ocr_text(raw_text)
+            if is_valid:
+                break
+            if content_attempt < OCR_MAX_CONTENT_ATTEMPTS:
+                logger.warning(
+                    "OCR returned empty content page=%s model=%s attempt=%s/%s; retrying same page",
+                    page_num, getattr(active_engine, "model", None), content_attempt, OCR_MAX_CONTENT_ATTEMPTS,
+                )
+        else:
+            # Loop exhausted without a `break` -- all attempts returned invalid
+            # content. Do NOT skip the page (Zero Silent Fallback): raise the
+            # exact same OCRNoTextError the original single-attempt code raised.
+            _raise_ocr_no_text_error(page_num, failure_kind)
 
         return OCRPageResult(
             page_num=page_num,
