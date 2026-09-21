@@ -103,6 +103,10 @@ STATUS_PASS = "PASS"
 STATUS_FAIL = "FAIL"
 STATUS_UNKNOWN = "UNKNOWN"
 STATUS_VISUAL_QA_UNAVAILABLE = "VISUAL_QA_UNAVAILABLE"
+# Deterministic QA all PASS, and the only visual-QA failure is font_consistency: export
+# is allowed (non-blocking), but the finding is still surfaced so it is never silently
+# discarded. See _WARNING_ONLY_VISUAL_CATEGORIES below for the export-policy rationale.
+STATUS_PASS_WITH_WARNING = "PASS_WITH_WARNING"
 
 _VISUAL_CHECK_KEYS = (
     "logo",
@@ -112,6 +116,16 @@ _VISUAL_CHECK_KEYS = (
     "spacing_alignment",
 )
 _ALL_VISUAL_KEYS = _VISUAL_CHECK_KEYS + ("overall_visual_fidelity",)
+
+# Export policy: a FAIL on any of these categories still blocks export (genuine visual
+# defects: broken logo, corrupted header/footer, broken table layout, broken spacing/
+# alignment). font_consistency is deliberately excluded — cross-platform LibreOffice/
+# Linux font substitution produces frequent, subjective, non-blocking rendering
+# differences (e.g. a name rendering sans-serif, or parenthetical text rendering roman
+# instead of italic) that must be visible as a warning but must never block export on
+# their own. Structural/deterministic checks are entirely unaffected by this policy.
+_BLOCKING_VISUAL_CATEGORIES = tuple(k for k in _VISUAL_CHECK_KEYS if k != "font_consistency")
+_WARNING_ONLY_VISUAL_CATEGORIES = ("font_consistency",)
 
 
 # ==============================================================================
@@ -1018,7 +1032,6 @@ class DocumentQAAgent:
 
             model_name = getattr(agent, "model", None)
             per_category: Dict[str, List[str]] = {k: [] for k in _VISUAL_CHECK_KEYS}
-            overall_flags: List[str] = []
 
             try:
                 for i in range(page_pairs):
@@ -1028,7 +1041,6 @@ class DocumentQAAgent:
 
                     for key in per_category:
                         per_category[key].append(page_result.get(key, STATUS_UNKNOWN))
-                    overall_flags.append(page_result.get("overall_visual_fidelity", STATUS_FAIL))
 
                     for item in page_result.get("issues", []) or []:
                         issues.append(f"[page {i + 1}] {item}")
@@ -1044,11 +1056,30 @@ class DocumentQAAgent:
                 )
 
         visual_checks = {key: _worst_status(values) for key, values in per_category.items()}
-        visual_checks["overall_visual_fidelity"] = (
-            STATUS_FAIL if any(v == STATUS_FAIL for v in overall_flags) else STATUS_PASS
-        )
 
-        overall_status = STATUS_PASS if visual_checks["overall_visual_fidelity"] == STATUS_PASS else STATUS_FAIL
+        # Export policy: only a genuine FAIL on a blocking visual category (logo,
+        # header_footer, table_layout, spacing_alignment) fails the whole document and
+        # blocks export. A font_consistency-only FAIL is downgraded to a non-blocking
+        # PASS_WITH_WARNING — the finding stays visible in `issues` and in
+        # visual_checks['font_consistency'] (still reported as FAIL there), it just
+        # doesn't gate export. Deterministic checks are never affected by this policy.
+        has_blocking_visual_fail = any(visual_checks[key] == STATUS_FAIL for key in _BLOCKING_VISUAL_CATEGORIES)
+        has_warning_only_fail = any(visual_checks[key] == STATUS_FAIL for key in _WARNING_ONLY_VISUAL_CATEGORIES)
+
+        if has_blocking_visual_fail:
+            visual_checks["overall_visual_fidelity"] = STATUS_FAIL
+            overall_status = STATUS_FAIL
+        elif has_warning_only_fail:
+            visual_checks["overall_visual_fidelity"] = STATUS_PASS_WITH_WARNING
+            overall_status = STATUS_PASS_WITH_WARNING
+            issues.append(
+                "font_consistency reported a rendering difference (non-blocking: cross-platform "
+                "font-substitution findings do not block export per policy). Review before finalizing."
+            )
+        else:
+            visual_checks["overall_visual_fidelity"] = STATUS_PASS
+            overall_status = STATUS_PASS
+
         return _build_result(overall_status, deterministic_checks, visual_checks, issues, model_name, timestamp)
 
 
@@ -1059,12 +1090,17 @@ def run_document_qa_gate(
     """Convenience export gate.
 
     - status PASS -> returns qa_result, caller may export.
+    - status PASS_WITH_WARNING -> returns qa_result (does NOT raise); deterministic checks
+      passed and the only visual-QA failure is font_consistency (non-blocking per policy —
+      cross-platform font-substitution rendering differences). Caller may export, but MUST
+      surface the warning explicitly (never silently treat it as a clean PASS).
     - status VISUAL_QA_UNAVAILABLE -> returns qa_result (does NOT raise); deterministic checks
       already passed, but visual fidelity could not be verified in this environment. Caller
       decides whether to still allow export, but MUST surface this state explicitly (never
       silently treat it as PASS).
     - status FAIL -> raises DocumentQAFailedError carrying the full qa_result; caller must
-      block export.
+      block export. This includes: any deterministic check failing, or a genuine visual
+      FAIL on logo/header_footer/table_layout/spacing_alignment.
     """
     agent = DocumentQAAgent(template_path=template_path)
     result = agent.run_qa(generated_docx_path)

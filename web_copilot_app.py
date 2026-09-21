@@ -3562,11 +3562,15 @@ HTML_PAGE = """<!DOCTYPE html>
       const visChecks = qa.visual_checks || {};
       const issues = qa.issues || [];
 
-      const renderCheckRow = (label, value) => {
+      // font_consistency never blocks export (cross-platform font-substitution
+      // differences) -- render its row as a warning (amber), never as a blocking
+      // failure (red), even when the model reports FAIL for it.
+      const NON_BLOCKING_VISUAL_KEYS = new Set(['font_consistency']);
+      const renderCheckRow = (label, value, nonBlocking) => {
         const ok = value === 'PASS';
         const isFail = value === 'FAIL';
-        const icon = ok ? '✓' : (isFail ? '✕' : '·');
-        const color = ok ? 'var(--color-success)' : (isFail ? 'var(--color-danger)' : 'var(--color-text-faint)');
+        const icon = ok ? '✓' : (isFail ? (nonBlocking ? '!' : '✕') : '·');
+        const color = ok ? 'var(--color-success)' : (isFail ? (nonBlocking ? 'var(--color-warning)' : 'var(--color-danger)') : 'var(--color-text-faint)');
         return `<div class="flex items-center gap-1.5 text-xs"><span style="color:${color}; font-weight:700;">${icon}</span><span style="color:var(--color-text-muted);">${escapeHtml(label)}</span></div>`;
       };
 
@@ -3577,18 +3581,21 @@ HTML_PAGE = """<!DOCTYPE html>
         header_footer_relationships_present: 'Header/Footer', image_logo_relationships_preserved: 'Logo',
       };
       const visLabels = {
-        logo: 'Logo', header_footer: 'Header/Footer', font_consistency: 'Font chữ',
+        logo: 'Logo', header_footer: 'Header/Footer', font_consistency: 'Font chữ (cảnh báo, không chặn)',
         table_layout: 'Bố cục bảng', spacing_alignment: 'Căn chỉnh/Khoảng cách', overall_visual_fidelity: 'Tổng thể',
       };
 
-      const detHtml = Object.entries(detChecks).map(([k, v]) => renderCheckRow(detLabels[k] || k, v)).join('');
+      const detHtml = Object.entries(detChecks).map(([k, v]) => renderCheckRow(detLabels[k] || k, v, false)).join('');
       const visEntries = Object.entries(visChecks).filter(([k]) => k !== 'overall_visual_fidelity');
-      const visHtml = visEntries.map(([k, v]) => renderCheckRow(visLabels[k] || k, v)).join('');
+      const visHtml = visEntries.map(([k, v]) => renderCheckRow(visLabels[k] || k, v, NON_BLOCKING_VISUAL_KEYS.has(k))).join('');
 
       let statusChip, statusNote;
       if (qa.status === 'PASS') {
         statusChip = '<span class="chip chip-success">PASS</span>';
         statusNote = 'Tài liệu đạt chuẩn định dạng MB07.';
+      } else if (qa.status === 'PASS_WITH_WARNING') {
+        statusChip = '<span class="chip chip-warning">PASS — CÓ CẢNH BÁO</span>';
+        statusNote = 'Xuất bản đã được cho phép. Phát hiện khác biệt font chữ (không chặn xuất bản theo chính sách) — vui lòng xem lại trước khi hoàn tất.';
       } else if (qa.status === 'VISUAL_QA_UNAVAILABLE') {
         statusChip = '<span class="chip chip-warning">VISUAL QA UNAVAILABLE</span>';
         statusNote = 'Kiểm định cấu trúc đạt yêu cầu. Không thể xác minh định dạng hiển thị trong môi trường này.';
@@ -3597,8 +3604,9 @@ HTML_PAGE = """<!DOCTYPE html>
         statusNote = 'Tài liệu chưa đạt kiểm định định dạng MB07 — xuất bản bị chặn.';
       }
 
+      const issuesColor = qa.status === 'FAIL' ? 'var(--color-danger)' : 'var(--color-warning)';
       const issuesHtml = (qa.status !== 'PASS' && issues.length > 0)
-        ? `<ul class="text-xs mt-2 space-y-1 list-disc list-inside text-wrap-safe" style="color:var(--color-danger);">${issues.slice(0, 8).map(i => `<li>${escapeHtml(String(i))}</li>`).join('')}</ul>`
+        ? `<ul class="text-xs mt-2 space-y-1 list-disc list-inside text-wrap-safe" style="color:${issuesColor};">${issues.slice(0, 8).map(i => `<li>${escapeHtml(String(i))}</li>`).join('')}</ul>`
         : '';
 
       panel.classList.remove('hidden');

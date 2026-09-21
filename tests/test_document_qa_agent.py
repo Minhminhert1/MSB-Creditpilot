@@ -40,6 +40,7 @@ from msb_eb_copilot.src.document_qa_agent import (
     MAX_VISUAL_QA_ATTEMPTS,
     STATUS_FAIL,
     STATUS_PASS,
+    STATUS_PASS_WITH_WARNING,
     STATUS_VISUAL_QA_UNAVAILABLE,
     run_deterministic_checks,
     run_document_qa_gate,
@@ -240,6 +241,95 @@ class TestDocumentQAOrchestrator(unittest.TestCase):
         with self.assertRaises(DocumentQAFailedError):
             with patch("msb_eb_copilot.src.document_qa_agent.DocumentQAAgent", return_value=agent):
                 run_document_qa_gate(self.compatible_docx, template_path=self.template_path)
+
+    def _font_only_failing_page_result(self):
+        """Deterministic-equivalent PASS on every visual category except a genuine
+        font_consistency finding — the exact production scenario this policy targets
+        (e.g. a name rendering sans-serif or parenthetical text rendering roman
+        instead of italic due to cross-platform LibreOffice/Linux font substitution)."""
+        return {
+            "logo": "PASS",
+            "header_footer": "PASS",
+            "font_consistency": "FAIL",
+            "table_layout": "PASS",
+            "spacing_alignment": "PASS",
+            "overall_visual_fidelity": "FAIL",
+            "issues": [
+                "\"GAS SOUTH JSC (PGS)\" renders in a sans-serif font instead of the "
+                "template's Times New Roman.",
+                "Parenthetical text renders upright instead of italic.",
+            ],
+        }
+
+    def test_06b_font_consistency_only_fail_does_not_block_export(self):
+        """Deterministic PASS + the ONLY visual failure being font_consistency must
+        downgrade to PASS_WITH_WARNING and allow export (run_document_qa_gate must
+        NOT raise), while still surfacing the font finding as a warning."""
+        agent = DocumentQAAgent(
+            template_path=self.template_path,
+            renderer=_FakeRenderer,
+            vision_agent_factory=lambda: _FakeVisionAgent(page_result=self._font_only_failing_page_result()),
+        )
+        result = agent.run_qa(self.compatible_docx)
+
+        self.assertEqual(result["status"], STATUS_PASS_WITH_WARNING)
+        self.assertEqual(result["visual_checks"]["font_consistency"], STATUS_FAIL)
+        self.assertEqual(result["visual_checks"]["overall_visual_fidelity"], STATUS_PASS_WITH_WARNING)
+        # Deterministic checks must all still be PASS and unaffected by this policy.
+        self.assertTrue(all(v == STATUS_PASS for v in result["deterministic_checks"].values()))
+
+        # Font findings must remain visible (never silently discarded).
+        self.assertTrue(any("sans-serif" in i for i in result["issues"]))
+        self.assertTrue(any("italic" in i for i in result["issues"]))
+        self.assertTrue(any("font_consistency" in i and "non-blocking" in i for i in result["issues"]))
+
+        # Export must be allowed: run_document_qa_gate must NOT raise for this status.
+        with patch("msb_eb_copilot.src.document_qa_agent.DocumentQAAgent", return_value=agent):
+            gated_result = run_document_qa_gate(self.compatible_docx, template_path=self.template_path)
+        self.assertEqual(gated_result["status"], STATUS_PASS_WITH_WARNING)
+
+    def test_06c_font_consistency_plus_blocking_category_still_blocks(self):
+        """font_consistency being non-blocking must not accidentally mask a genuine
+        blocking failure reported alongside it on the same page."""
+        page_result = self._font_only_failing_page_result()
+        page_result["table_layout"] = "FAIL"
+        page_result["issues"].append("Table 2 columns misaligned.")
+
+        agent = DocumentQAAgent(
+            template_path=self.template_path,
+            renderer=_FakeRenderer,
+            vision_agent_factory=lambda: _FakeVisionAgent(page_result=page_result),
+        )
+        result = agent.run_qa(self.compatible_docx)
+
+        self.assertEqual(result["status"], STATUS_FAIL)
+        self.assertEqual(result["visual_checks"]["table_layout"], STATUS_FAIL)
+        self.assertEqual(result["visual_checks"]["font_consistency"], STATUS_FAIL)
+
+        with self.assertRaises(DocumentQAFailedError):
+            with patch("msb_eb_copilot.src.document_qa_agent.DocumentQAAgent", return_value=agent):
+                run_document_qa_gate(self.compatible_docx, template_path=self.template_path)
+
+    def test_06d_deterministic_fail_blocks_export_even_if_visual_would_pass(self):
+        """Deterministic QA remains the hard gate: a deterministic FAIL must block
+        export regardless of what visual QA would have reported."""
+        broken_docx = os.path.join(self.temp_dir, "broken_for_policy_test.docx")
+        with open(broken_docx, "wb") as f:
+            f.write(b"not a valid docx package")
+
+        agent = DocumentQAAgent(
+            template_path=self.template_path,
+            renderer=_FakeRenderer,
+            vision_agent_factory=lambda: _FakeVisionAgent(page_result=self._passing_page_result()),
+        )
+        result = agent.run_qa(broken_docx)
+
+        self.assertEqual(result["status"], STATUS_FAIL)
+        self.assertFalse(all(v == STATUS_PASS for v in result["deterministic_checks"].values()))
+
+        with self.assertRaises(DocumentQAFailedError):
+            with patch("msb_eb_copilot.src.document_qa_agent.DocumentQAAgent", return_value=agent):
+                run_document_qa_gate(broken_docx, template_path=self.template_path)
 
     def test_07_visual_qa_greennode_exception_fails_closed(self):
         agent = DocumentQAAgent(
