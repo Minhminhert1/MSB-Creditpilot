@@ -45,6 +45,9 @@ from msb_eb_copilot.src.ingestion.pdf_ocr import (
     DEFAULT_OCR_RPM_LIMIT,
     OCR_MAX_CONTENT_ATTEMPTS,
     _classify_ocr_text,
+    _TRANSIENT_5XX_STATUS_CODES,
+    _TRANSIENT_5XX_MAX_ATTEMPTS,
+    _compute_transient_5xx_wait_seconds,
 )
 from msb_eb_copilot.src.extraction.legal_extraction import (
     LegalDocumentExtractor,
@@ -490,6 +493,223 @@ def test_non_429_client_errors_are_never_retried(exc_cls, status_code):
 
     assert mock_create.call_count == 1
     sleep_mock.assert_not_called()
+
+
+# --- A/B/C/D: transient 5xx retry-with-wait behavior -------------------------
+
+@pytest.mark.parametrize("status_code", sorted(_TRANSIENT_5XX_STATUS_CODES))
+def test_transient_5xx_then_success_retries_same_page_and_succeeds(status_code):
+    """A/B/C/D. 500/502/503/504 then success -> retries the SAME page (same
+    messages/image, not a document restart) and succeeds; wait follows the fixed
+    bounded schedule (2s for attempt 1)."""
+    err = _make_status_error(
+        _openai_pkg.InternalServerError, status_code,
+        "Internal network failure ... please try again later.",
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[err, _make_success_response(f"page ok after {status_code}")],
+    ) as mock_create:
+        result = engine.ocr_page(FAKE_BASE64_IMAGE, page_num=20)
+
+    assert result == f"page ok after {status_code}"
+    assert mock_create.call_count == 2
+    sleep_mock.assert_called_once_with(2.0)
+
+
+def test_transient_5xx_backoff_schedule_is_2_5_10():
+    assert _compute_transient_5xx_wait_seconds(1) == 2.0
+    assert _compute_transient_5xx_wait_seconds(2) == 5.0
+    assert _compute_transient_5xx_wait_seconds(3) == 10.0
+
+
+def test_transient_5xx_uses_bounded_backoff_schedule_across_retries():
+    err = _make_status_error(_openai_pkg.InternalServerError, 500, "Internal network failure.")
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[err, err, err, _make_success_response("ok on 4th attempt")],
+    ) as mock_create:
+        result = engine.ocr_page(FAKE_BASE64_IMAGE, page_num=21)
+
+    assert result == "ok on 4th attempt"
+    assert mock_create.call_count == 4
+    assert [c.args[0] for c in sleep_mock.call_args_list] == [2.0, 5.0, 10.0]
+
+
+# --- E: repeated 500 exhaustion -----------------------------------------------
+
+def test_repeated_500_exhausts_all_4_attempts_then_raises_ocr_service_error():
+    """E. 4 consecutive 500s -> OCRServiceError raised, exception chain preserved,
+    exactly 4 calls made (same page, never restarted), 3 waits (2s/5s/10s)."""
+    err = _make_status_error(_openai_pkg.InternalServerError, 500, "Internal network failure.")
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create", side_effect=[err, err, err, err],
+    ) as mock_create:
+        with pytest.raises(OCRServiceError) as exc_info:
+            engine.ocr_page(FAKE_BASE64_IMAGE, page_num=22)
+
+    assert mock_create.call_count == _TRANSIENT_5XX_MAX_ATTEMPTS == 4
+    assert exc_info.value.__cause__ is err
+    assert [c.args[0] for c in sleep_mock.call_args_list] == [2.0, 5.0, 10.0]
+
+
+# --- J: 5xx retry still passes through the shared rate limiter --------------
+
+def test_transient_5xx_retry_respects_shared_rate_limiter():
+    err = _make_status_error(_openai_pkg.InternalServerError, 503, "Internal network failure.")
+    mock_limiter = MagicMock()
+    mock_limiter.enabled = True
+    engine = QwenVisionOCREngine(api_key=FAKE_API_KEY, rate_limiter=mock_limiter, sleep_fn=MagicMock())
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[err, _make_success_response("ok")],
+    ) as mock_create:
+        engine.ocr_page(FAKE_BASE64_IMAGE, page_num=23)
+
+    assert mock_create.call_count == 2
+    assert mock_limiter.acquire.call_count == 2  # once per attempt, including the retry
+
+
+# --- I: 429 retry behavior remains completely unchanged ----------------------
+
+def test_429_and_5xx_are_independent_status_code_sets():
+    """I. Confirms 429 is not part of the new transient-5xx set (and vice versa) --
+    the two retry paths dispatch on disjoint status codes."""
+    assert 429 not in _TRANSIENT_5XX_STATUS_CODES
+    assert _TRANSIENT_5XX_STATUS_CODES == frozenset({500, 502, 503, 504})
+
+
+def test_429_retry_still_uses_retry_after_parsing_not_5xx_backoff():
+    """I. A 429 must still use Retry-After/resets-in-Ns parsing (not the fixed
+    2/5/10s 5xx schedule), proving the two retry axes were not accidentally merged."""
+    err_429 = _make_status_error(
+        _openai_pkg.RateLimitError, 429,
+        "model rpm limit exceeded (5/5), resets in 2s",
+        headers={"Retry-After": "2"},
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[err_429, _make_success_response("ok")],
+    ):
+        engine.ocr_page(FAKE_BASE64_IMAGE, page_num=24)
+
+    sleep_mock.assert_called_once_with(3.0)  # 2s Retry-After + 1s buffer, NOT 2.0/5.0/10.0
+
+
+# --- K: no secret leakage during transient-5xx retries/exhaustion ------------
+
+def test_transient_5xx_retry_logging_never_leaks_secrets(caplog):
+    err = _make_status_error(
+        _openai_pkg.InternalServerError, 500,
+        f"Internal network failure -- key={FAKE_API_KEY}",
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[err, _make_success_response("ok")],
+    ):
+        with caplog.at_level(logging.WARNING, logger="msb_eb_copilot.src.ingestion.pdf_ocr"):
+            engine.ocr_page(FAKE_BASE64_IMAGE, page_num=25)
+
+    log_text = caplog.text
+    assert "OCR transient server error page=25" in log_text
+    assert "status=500" in log_text
+    assert "attempt=1/4" in log_text
+    assert "wait_seconds=2" in log_text
+    assert "retrying same page" in log_text
+    assert FAKE_API_KEY not in log_text
+    assert FAKE_BASE64_IMAGE not in log_text
+
+
+def test_transient_5xx_exhaustion_logging_never_leaks_secrets(caplog):
+    err = _make_status_error(
+        _openai_pkg.InternalServerError, 502,
+        f"Internal network failure -- key={FAKE_API_KEY}",
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(engine.client.chat.completions, "create", side_effect=[err, err, err, err]):
+        with caplog.at_level(logging.ERROR, logger="msb_eb_copilot.src.ingestion.pdf_ocr"):
+            with pytest.raises(OCRServiceError):
+                engine.ocr_page(FAKE_BASE64_IMAGE, page_num=26)
+
+    log_text = caplog.text
+    assert FAKE_API_KEY not in log_text
+    assert FAKE_BASE64_IMAGE not in log_text
+    assert "Authorization" not in log_text
+
+
+# --- L: interaction with empty-content retry remains bounded -----------------
+
+def test_content_retry_combined_with_5xx_retry_stays_bounded():
+    """L. Content retry (max 3) composes with the independent shared 429/5xx retry
+    (max 4 per call) without an uncontrolled explosion: content-attempt 1 needs one
+    internal 500 retry (2 raw API calls) and still comes back empty; content-attempt
+    2 succeeds immediately (1 raw API call). Total raw API calls = 3, well under the
+    documented 3 x 4 = 12 worst-case ceiling."""
+    err_500 = _make_status_error(_openai_pkg.InternalServerError, 500, "Internal network failure.")
+    sleep_mock = MagicMock()
+    engine = QwenVisionOCREngine(
+        api_key=FAKE_API_KEY,
+        rate_limiter=OCRRateLimiter(rpm_limit=999999, enabled=False),
+        sleep_fn=sleep_mock,
+    )
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[
+            err_500,                                              # content-attempt 1, API try 1: 500
+            _make_success_response(""),                            # content-attempt 1, API try 2: empty text
+            _make_success_response("Nội dung hợp lệ cuối cùng"),   # content-attempt 2: valid
+        ],
+    ) as mock_create:
+        result = PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+
+    assert result.text == "Nội dung hợp lệ cuối cùng"
+    assert mock_create.call_count == 3
+    sleep_mock.assert_called_once_with(2.0)  # exactly one 5xx wait, from content-attempt 1
+
+
+def test_content_retry_combined_with_5xx_exhaustion_stays_bounded_at_12_calls():
+    """L. Worst case: every content attempt (3) exhausts its full 5xx retry budget
+    (4 API calls each) -- total capped at exactly 3 x 4 = 12 calls, then
+    OCRNoTextError is raised (content exhaustion), never an unbounded loop."""
+    err_500 = _make_status_error(_openai_pkg.InternalServerError, 500, "Internal network failure.")
+    sleep_mock = MagicMock()
+    engine = QwenVisionOCREngine(
+        api_key=FAKE_API_KEY,
+        rate_limiter=OCRRateLimiter(rpm_limit=999999, enabled=False),
+        sleep_fn=sleep_mock,
+    )
+
+    # 3 content attempts x 4 API calls: the 4th call of each group of 4 finally
+    # "succeeds" at the transport level but returns empty content, so the outer
+    # content-retry loop advances to the next content attempt.
+    responses = []
+    for _ in range(3):
+        responses.extend([err_500, err_500, err_500, _make_success_response("")])
+
+    with patch.object(engine.client.chat.completions, "create", side_effect=responses) as mock_create:
+        with pytest.raises(OCRNoTextError):
+            PDFOCRIngestor.ocr_single_page(doc_or_path=SCANNED_FIXTURE_PDF, page_num=1, engine=engine)
+
+    assert mock_create.call_count == 12
 
 
 # --- K: no secret leakage during rate-limit retries/exhaustion ---------------

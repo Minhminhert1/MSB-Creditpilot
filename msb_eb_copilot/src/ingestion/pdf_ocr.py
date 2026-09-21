@@ -378,21 +378,55 @@ def _compute_rate_limit_wait_seconds(exc: BaseException, attempt: int) -> Tuple[
 
 
 # ==============================================================================
-# 2d. OCR CONTENT-EMPTY RETRY (page-level, independent of the 429 retry above)
+# 2c-2. TRANSIENT SERVER-SIDE (5xx) RETRY -- separate axis from the 429 retry
+# ==============================================================================
+# Confirmed production error: HTTP 500 ("Internal network failure ... please try
+# again later.") while OCR'ing page 20 of z-ai/glm-5.3-flash-thirdparty. This is
+# a transient upstream fault, not a rate limit and not a client error -- it should
+# be retried, but with its own fixed bounded backoff (NOT the 429 Retry-After/
+# resets-in-Ns parsing, which is meaningless for a plain 5xx).
+#
+# IMPORTANT -- shares the SAME `attempt` counter as the 429 retry inside
+# ocr_page() (there is exactly one attempt counter per ocr_page() call, whatever
+# mix of 429/5xx failures it hits), so the two retry axes do not add on top of
+# each other: the hard cap stays 4 total API attempts per ocr_page() call,
+# regardless of whether those failures were 429, 5xx, or a mix of both.
+_TRANSIENT_5XX_STATUS_CODES = frozenset({500, 502, 503, 504})
+_TRANSIENT_5XX_MAX_ATTEMPTS = 4  # same shared per-call budget as _RATE_LIMIT_MAX_ATTEMPTS
+# attempt N -> seconds to wait before attempt N+1 (bounded, not unbounded exponential).
+_TRANSIENT_5XX_BACKOFF_SCHEDULE_SECONDS: Dict[int, float] = {1: 2.0, 2: 5.0, 3: 10.0}
+
+
+def _compute_transient_5xx_wait_seconds(attempt: int) -> float:
+    """Bounded backoff for a transient 5xx failure on the given (1-based) attempt
+    number. Never reached beyond attempt 3 in practice because
+    _TRANSIENT_5XX_MAX_ATTEMPTS caps retries at 4 total attempts, but falls back
+    to the longest scheduled wait if it ever were."""
+    last_scheduled_attempt = max(_TRANSIENT_5XX_BACKOFF_SCHEDULE_SECONDS)
+    return _TRANSIENT_5XX_BACKOFF_SCHEDULE_SECONDS.get(
+        attempt, _TRANSIENT_5XX_BACKOFF_SCHEDULE_SECONDS[last_scheduled_attempt]
+    )
+
+
+# ==============================================================================
+# 2d. OCR CONTENT-EMPTY RETRY (page-level, independent of the 429/5xx retry above)
 # ==============================================================================
 # Confirmed production case: a physical page with substantial real text can still
 # come back from the Vision model as None/empty/no-alnum-content on a given call
 # (a transient model-side failure, not a genuinely blank page). This is a SEPARATE
-# retry axis from the 429 handling inside QwenVisionOCREngine.ocr_page:
-#   - The 429 retry loop retries a single API call up to 4 times when the
-#     transport/HTTP layer says "rate limited" -- it never inspects OCR content.
+# retry axis from the 429/5xx handling inside QwenVisionOCREngine.ocr_page:
+#   - The 429/5xx retry loop retries a single API call up to 4 TOTAL attempts
+#     (shared budget, not 4+4) when the transport/HTTP layer reports a rate limit
+#     or a transient server error -- it never inspects OCR content.
 #   - This content retry loop retries the whole ocr_page() call (i.e. a fresh API
-#     request, itself internally allowed its own up to 4 attempts against 429) up
-#     to 3 times when the HTTP call succeeded but the returned text is unusable.
+#     request, itself internally allowed its own up to 4 attempts against
+#     429/5xx) up to 3 times when the HTTP call succeeded but the returned text
+#     is unusable.
 # These two axes multiply, not add, in the worst case: with a content-attempt
-# cap of 3 and a 429-attempt cap of 4, the hard ceiling is 3 x 4 = 12 real API
-# calls to GreenNode for a single page, only reached if every single one of those
-# 12 calls is itself rate-limited. In the common case (no 429s) it is exactly 3.
+# cap of 3 and a shared 429/5xx-attempt cap of 4, the hard ceiling is 3 x 4 = 12
+# real API calls to GreenNode for a single page, only reached if every single one
+# of those 12 calls is itself rate-limited or a transient 5xx. In the common case
+# (no 429s/5xx) it is exactly 3.
 OCR_MAX_CONTENT_ATTEMPTS = 3
 
 
@@ -586,8 +620,8 @@ class QwenVisionOCREngine(BaseOCREngine):
             except (APIError, APIConnectionError) as exc:
                 status_code = getattr(exc, "status_code", None)
 
-                # Only HTTP 429 is ever retried. 400/401/403/etc. fall straight
-                # through to the existing (unretried) error path below.
+                # Only HTTP 429 is ever retried here. 400/401/403/etc. fall
+                # straight through to the existing (unretried) error path below.
                 if status_code == 429 and attempt < _RATE_LIMIT_MAX_ATTEMPTS:
                     wait_seconds, source = _compute_rate_limit_wait_seconds(exc, attempt)
                     secrets = self._known_secrets()
@@ -595,6 +629,22 @@ class QwenVisionOCREngine(BaseOCREngine):
                     logger.warning(
                         "OCR rate limited page=%s model=%s attempt=%s wait_seconds=%s source=%s",
                         page_num, self.model, attempt, round(wait_seconds, 2), source,
+                    )
+                    self._sleep(wait_seconds)
+                    continue
+
+                # Transient server-side failures (500/502/503/504): retried with
+                # a fixed bounded backoff, sharing the SAME attempt budget as the
+                # 429 check above (never more than 4 total attempts either way).
+                # 400/401/403/404/409/422/etc. are NOT in this set and fall
+                # straight through unretried.
+                if status_code in _TRANSIENT_5XX_STATUS_CODES and attempt < _TRANSIENT_5XX_MAX_ATTEMPTS:
+                    wait_seconds = _compute_transient_5xx_wait_seconds(attempt)
+                    secrets = self._known_secrets()
+                    _sanitize_exception_message_in_place(exc, secrets)
+                    logger.warning(
+                        "OCR transient server error page=%s model=%s status=%s attempt=%s/%s wait_seconds=%s; retrying same page",
+                        page_num, self.model, status_code, attempt, _TRANSIENT_5XX_MAX_ATTEMPTS, wait_seconds,
                     )
                     self._sleep(wait_seconds)
                     continue
