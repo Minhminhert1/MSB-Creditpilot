@@ -16,7 +16,7 @@ Cung cấp một điểm vào (entry point) duy nhất cho việc tiếp nhận 
 """
 
 import os
-from typing import Dict, List, Literal, Optional
+from typing import Callable, Dict, List, Literal, Optional
 from pydantic import BaseModel, Field
 
 import pypdf
@@ -80,6 +80,7 @@ class DocumentIngestionRouter:
         ocr_engine: Optional[BaseOCREngine] = None,
         dpi: int = DEFAULT_DPI,
         max_workers: Optional[int] = None,
+        progress_callback: Optional[Callable[[int, int, int], None]] = None,
     ) -> DocumentIngestionResult:
         """Nhập liệu tệp PDF với chính sách ưu tiên digital text, chỉ fallback sang OCR khi cần thiết.
 
@@ -88,6 +89,9 @@ class DocumentIngestionRouter:
             ocr_engine: Engine OCR tùy chọn (mặc định khởi tạo QwenVisionOCREngine).
             dpi: Độ phân giải rasterize trang khi kích hoạt OCR fallback (mặc định 150).
             max_workers: Số luồng OCR song song tối đa (mặc định đọc từ OCR_MAX_WORKERS hoặc 4, bounded [1, 8]).
+            progress_callback: Tùy chọn, chuyển tiếp thẳng xuống PDFOCRIngestor khi cần
+                OCR fallback -- gọi lại (page_num, completed_count, total_pages) sau mỗi
+                trang OCR hoàn tất. Không tác động tới đường đi digital-only (không OCR).
 
         Returns:
             DocumentIngestionResult chứa tagged_text và metadata nguồn gốc.
@@ -124,6 +128,7 @@ class DocumentIngestionRouter:
                     engine=ocr_engine,
                     dpi=dpi,
                     max_workers=max_workers,
+                    progress_callback=progress_callback,
                 )
                 return DocumentIngestionResult(
                     tagged_text=ocr_result.tagged_text,
@@ -158,6 +163,7 @@ class DocumentIngestionRouter:
                     engine=active_engine,
                     dpi=dpi,
                     max_workers=max_workers,
+                    progress_callback=progress_callback,
                 )
                 return DocumentIngestionResult(
                     tagged_text=ocr_result.tagged_text,
@@ -191,6 +197,7 @@ class DocumentIngestionRouter:
                 engine=active_engine,
                 dpi=dpi,
                 max_workers=max_workers,
+                progress_callback=progress_callback,
             )
             ocr_pages = {p_num: res.text for p_num, res in ocr_pages_result.items()}
 

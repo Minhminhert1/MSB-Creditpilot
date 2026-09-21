@@ -34,7 +34,7 @@ import threading
 import collections
 import concurrent.futures
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 
 import pypdf
@@ -798,6 +798,7 @@ class PDFOCRIngestor:
         engine: Optional[BaseOCREngine] = None,
         dpi: int = DEFAULT_DPI,
         max_workers: Optional[int] = None,
+        progress_callback: Optional[Callable[[int, int, int], None]] = None,
     ) -> Dict[int, OCRPageResult]:
         """Thực hiện OCR song song có giới hạn (Bounded Parallel OCR) cho danh sách các trang vật lý.
 
@@ -807,6 +808,11 @@ class PDFOCRIngestor:
             engine: OCR Engine tùy chọn.
             dpi: Độ phân giải rasterize (mặc định 150 DPI).
             max_workers: Số luồng tối đa (mặc định đọc từ OCR_MAX_WORKERS hoặc 4, bounded [1, 8]).
+            progress_callback: Tùy chọn, gọi lại sau MỖI trang hoàn tất thành công với
+                (page_num, completed_count, total_pages) -- dùng cho việc báo cáo tiến
+                độ (ví dụ: job nền của giao diện web). Không ảnh hưởng đến logic OCR/
+                retry hiện có; nếu callback tự ném lỗi, lỗi đó được nuốt (không làm hỏng
+                luồng OCR chính) vì đây chỉ là kênh báo cáo phụ trợ.
 
         Returns:
             Dict mapping từ page_num -> OCRPageResult.
@@ -821,10 +827,20 @@ class PDFOCRIngestor:
         active_engine = engine or QwenVisionOCREngine()
         workers = get_ocr_max_workers(max_workers)
         effective_workers = min(workers, len(page_nums))
+        total_pages = len(page_nums)
+
+        def _report_progress(p_num: int, completed_count: int) -> None:
+            if progress_callback is None:
+                return
+            try:
+                progress_callback(p_num, completed_count, total_pages)
+            except Exception:
+                pass
 
         # Nếu chỉ có 1 trang hoặc workers == 1: chạy tuần tự an toàn
         if effective_workers == 1:
             results: Dict[int, OCRPageResult] = {}
+            completed_count = 0
             for p_num in page_nums:
                 page_res = cls.ocr_single_page(
                     doc_or_path=pdf_path,
@@ -833,11 +849,14 @@ class PDFOCRIngestor:
                     dpi=dpi
                 )
                 results[p_num] = page_res
+                completed_count += 1
+                _report_progress(p_num, completed_count)
             return results
 
         # Chạy song song có giới hạn bằng ThreadPoolExecutor
         results: Dict[int, OCRPageResult] = {}
         first_exception: Optional[Exception] = None
+        completed_count = 0
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
             future_to_page = {
@@ -851,11 +870,16 @@ class PDFOCRIngestor:
                 for p_num in page_nums
             }
 
+            # as_completed() yields on this single (calling) thread only, so
+            # completed_count/_report_progress here need no extra lock even
+            # though the underlying OCR calls run concurrently.
             for future in concurrent.futures.as_completed(future_to_page):
                 p_num = future_to_page[future]
                 try:
                     res = future.result()
                     results[p_num] = res
+                    completed_count += 1
+                    _report_progress(p_num, completed_count)
                 except Exception as exc:
                     if first_exception is None:
                         first_exception = exc
@@ -875,6 +899,7 @@ class PDFOCRIngestor:
         engine: Optional[BaseOCREngine] = None,
         dpi: int = DEFAULT_DPI,
         max_workers: Optional[int] = None,
+        progress_callback: Optional[Callable[[int, int, int], None]] = None,
     ) -> OCRDocumentResult:
         """Thực hiện OCR toàn bộ tài liệu PDF và trả về đối tượng kết quả có cấu trúc."""
         # 1. Preflight xác định số trang dự kiến bằng pypdf
@@ -908,6 +933,7 @@ class PDFOCRIngestor:
             engine=active_engine,
             dpi=dpi,
             max_workers=max_workers,
+            progress_callback=progress_callback,
         )
 
         # 5. Đối chiếu bất biến số lượng kết quả

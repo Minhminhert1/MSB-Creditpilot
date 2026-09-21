@@ -916,6 +916,59 @@ def test_ocr_max_content_attempts_is_3():
 
 
 # ==============================================================================
+# 2e. PROGRESS CALLBACK (used by web_copilot_app's background job progress reporting)
+# ==============================================================================
+def test_progress_callback_fires_per_page_sequential():
+    engine = MockOCREngine(responses={1: "Trang 1 nội dung", 2: "Trang 2 nội dung", 3: "Trang 3 nội dung"})
+    calls = []
+    PDFOCRIngestor.ocr_pages_parallel(
+        pdf_path=SCANNED_FIXTURE_PDF, page_nums=[1, 2], engine=engine, max_workers=1,
+        progress_callback=lambda page_num, completed, total: calls.append((page_num, completed, total)),
+    )
+    assert calls == [(1, 1, 2), (2, 2, 2)]
+
+
+def test_progress_callback_fires_per_page_parallel():
+    engine = MockOCREngine(responses={1: "Trang 1", 2: "Trang 2"})
+    calls = []
+    lock = __import__("threading").Lock()
+    PDFOCRIngestor.ocr_pages_parallel(
+        pdf_path=SCANNED_FIXTURE_PDF, page_nums=[1, 2], engine=engine, max_workers=2,
+        progress_callback=lambda page_num, completed, total: (lock.acquire(), calls.append((page_num, completed, total)), lock.release()),
+    )
+    assert len(calls) == 2
+    assert {c[2] for c in calls} == {2}  # total_pages always 2
+    assert sorted(c[1] for c in calls) == [1, 2]  # completed count 1 then 2, no duplicates/skips
+
+
+def test_progress_callback_never_called_on_failed_page():
+    engine = MockOCREngine(responses={1: OCRServiceError("boom")})
+    calls = []
+    with pytest.raises(OCRServiceError):
+        PDFOCRIngestor.ocr_pages_parallel(
+            pdf_path=SCANNED_FIXTURE_PDF, page_nums=[1, 2], engine=engine, max_workers=1,
+            progress_callback=lambda *args: calls.append(args),
+        )
+    assert calls == []
+
+
+def test_progress_callback_exception_does_not_break_ocr():
+    """A buggy/raising progress_callback must never break the actual OCR pipeline --
+    it's a best-effort side channel only."""
+    engine = MockOCREngine(responses={1: "Trang 1", 2: "Trang 2"})
+
+    def _boom(*args):
+        raise RuntimeError("progress UI crashed")
+
+    results = PDFOCRIngestor.ocr_pages_parallel(
+        pdf_path=SCANNED_FIXTURE_PDF, page_nums=[1, 2], engine=engine, max_workers=1,
+        progress_callback=_boom,
+    )
+    assert results[1].text == "Trang 1"
+    assert results[2].text == "Trang 2"
+
+
+# ==============================================================================
 # 3. PAGE COUNT INVARIANT & FORMAT CONTRACT TESTS
 # ==============================================================================
 def test_ocr_page_count_invariant_and_formatting():

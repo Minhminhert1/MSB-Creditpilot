@@ -16,16 +16,18 @@ Tính năng nổi bật:
 import os
 import sys
 import json
+import time
 import logging
 import shutil
+import threading
 import urllib.parse
 import uuid
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -1907,7 +1909,7 @@ HTML_PAGE = """<!DOCTYPE html>
         case 'AI_PROCESSING':
           badgeHtml = '<span class="chip chip-info">AI extracting…</span>';
           actionButtons = '<button disabled class="btn btn-secondary btn-sm">Đang xử lý AI...</button>';
-          tipText = 'Mô hình GLM-5.2 / OCR đang trích xuất và đối soát trang...';
+          tipText = info.progressText || 'Mô hình GLM-5.2 / OCR đang trích xuất và đối soát trang...';
           break;
 
         case 'PREVIEW_READY':
@@ -1957,6 +1959,65 @@ HTML_PAGE = """<!DOCTYPE html>
       updateWorkspaceHeaderBadge();
     }
 
+    function sleep(ms) {
+      return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    const FINANCIAL_JOB_POLL_INTERVAL_MS = 2500;
+    const FINANCIAL_JOB_MAX_CONSECUTIVE_POLL_ERRORS = 5;
+
+    // Polls GET /api/financial_preview_job/<job_id> every ~2.5s until the
+    // background OCR job (created by the async POST /api/preview_financial_pdf)
+    // reaches a terminal state. Resolves with the same result payload shape the
+    // old synchronous endpoint used to return directly. A few consecutive
+    // transient poll failures are tolerated (the job keeps running server-side
+    // regardless) so the user never sees a premature "Failed to fetch".
+    async function pollFinancialJob(jobId, docType) {
+      let consecutiveErrors = 0;
+      while (true) {
+        await sleep(FINANCIAL_JOB_POLL_INTERVAL_MS);
+
+        let payload = null;
+        try {
+          const res = await fetch(`/api/financial_preview_job/${encodeURIComponent(jobId)}`);
+          payload = await res.json();
+          if (!res.ok) {
+            throw new Error(payload.message || 'Không tìm thấy công việc xử lý BCTC.');
+          }
+          consecutiveErrors = 0;
+        } catch (pollErr) {
+          consecutiveErrors += 1;
+          if (consecutiveErrors >= FINANCIAL_JOB_MAX_CONSECUTIVE_POLL_ERRORS) {
+            throw new Error('Mất kết nối tới máy chủ khi theo dõi tiến trình xử lý BCTC.');
+          }
+          continue;
+        }
+
+        if (payload.status === 'queued' || payload.status === 'processing') {
+          let progressMsg = payload.message || 'Đang xử lý BCTC...';
+          if (payload.current_page && payload.total_pages) {
+            progressMsg = `Đang đọc BCTC: trang ${payload.current_page} / ${payload.total_pages}`;
+          }
+          DOC_STATES[docType].progressText = progressMsg;
+          updateDocCardUI(docType);
+          continue;
+        }
+
+        if (payload.status === 'completed') {
+          DOC_STATES[docType].progressText = null;
+          return payload.result;
+        }
+
+        if (payload.status === 'failed') {
+          DOC_STATES[docType].progressText = null;
+          const err = payload.error || {};
+          throw new Error(err.message || 'Xử lý tài liệu BCTC không thành công.');
+        }
+
+        // Unknown/unexpected status: keep polling rather than failing loudly.
+      }
+    }
+
     async function handleFileSelected(docType, inputEl) {
       if (!inputEl || !inputEl.files || inputEl.files.length === 0) return;
       const file = inputEl.files[0];
@@ -1999,9 +2060,16 @@ HTML_PAGE = """<!DOCTYPE html>
             case_id: cid
           })
         });
-        const data = await res.json();
+        let data = await res.json();
 
-        if (!res.ok || data.status !== 'success') {
+        if (docType === 'financial') {
+          // Async job flow: POST only ever returns {status:'accepted', job_id}
+          // immediately (HTTP 202) -- the actual OCR result comes from polling.
+          if (!res.ok || data.status !== 'accepted' || !data.job_id) {
+            throw new Error(data.message || 'Lỗi tiếp nhận tệp BCTC.');
+          }
+          data = await pollFinancialJob(data.job_id, docType);
+        } else if (!res.ok || data.status !== 'success') {
           throw new Error(data.message || 'Lỗi bóc tách tài liệu.');
         }
 
@@ -4169,6 +4237,157 @@ class FinancialPreviewRecord:
 
 FINANCIAL_PREVIEW_STORE: dict[str, FinancialPreviewRecord] = {}
 
+# ==============================================================================
+# FINANCIAL PREVIEW BACKGROUND JOB MANAGER (async OCR, HTTP 202 + polling)
+# ==============================================================================
+# Confirmed production root cause: a 46-page scanned financial PDF against a 5 RPM
+# Vision model quota takes far longer than the browser/gateway request lifetime.
+# The synchronous POST /api/preview_financial_pdf therefore gets disconnected
+# ("Failed to fetch") while OCR keeps running server-side. Fix: POST only creates
+# a background job and returns immediately; the browser polls for progress/result.
+#
+# Deliberately simple for this codebase (no Redis/Celery): an in-process dict of
+# jobs guarded by a single Lock, each job executed on its own daemon thread. This
+# is safe because CopilotHTTPHandler already runs on a ThreadedHTTPServer, so
+# concurrent requests (including concurrent job creations/polls) are normal.
+FINANCIAL_JOB_RETENTION_SECONDS = 45 * 60  # within the required 30-60 minute window
+
+
+@dataclass
+class FinancialPreviewJob:
+    job_id: str
+    case_id: Optional[str] = None
+    status: str = "queued"  # queued | processing | completed | failed
+    current_page: Optional[int] = None
+    total_pages: Optional[int] = None
+    progress_percent: float = 0.0
+    message: str = "Đang xếp hàng chờ xử lý OCR..."
+    result: Optional[dict] = None
+    error: Optional[dict] = None
+    created_at: float = field(default_factory=time.monotonic)
+    updated_at: float = field(default_factory=time.monotonic)
+
+
+def _financial_job_to_safe_dict(job: FinancialPreviewJob) -> Dict[str, Any]:
+    """Builds the JSON-safe polling response. SAFE BY CONSTRUCTION: only ever reads
+    this fixed set of fields -- never the raw temp file path, never API keys, never
+    document contents (the 'result'/'error' payloads themselves are already the
+    same safe payloads process_financial_pdf_preview has always returned)."""
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "current_page": job.current_page,
+        "total_pages": job.total_pages,
+        "progress_percent": job.progress_percent,
+        "message": job.message,
+        "result": job.result if job.status == "completed" else None,
+        "error": job.error if job.status == "failed" else None,
+    }
+
+
+class FinancialJobManager:
+    """Thread-safe in-process background job manager for the financial PDF OCR
+    preview pipeline. All shared-state mutation goes through `self._lock`.
+
+    Bounded retention: every create/get call opportunistically purges
+    completed/failed jobs older than `retention_seconds` so memory does not grow
+    indefinitely, without needing a separate sweep thread."""
+
+    def __init__(self, retention_seconds: float = FINANCIAL_JOB_RETENTION_SECONDS, clock: Callable[[], float] = time.monotonic):
+        self._jobs: Dict[str, FinancialPreviewJob] = {}
+        self._lock = threading.Lock()
+        self._retention_seconds = retention_seconds
+        self._clock = clock
+
+    def _purge_expired_locked(self) -> None:
+        now = self._clock()
+        expired = [
+            jid for jid, job in self._jobs.items()
+            if job.status in ("completed", "failed") and (now - job.updated_at) > self._retention_seconds
+        ]
+        for jid in expired:
+            del self._jobs[jid]
+
+    def create_job(self, case_id: Optional[str]) -> str:
+        job_id = str(uuid.uuid4())  # unpredictable job id (UUID4)
+        job = FinancialPreviewJob(job_id=job_id, case_id=case_id)
+        with self._lock:
+            self._purge_expired_locked()
+            self._jobs[job_id] = job
+        return job_id
+
+    def get_job_snapshot(self, job_id: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            self._purge_expired_locked()
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            return _financial_job_to_safe_dict(job)
+
+    def _update(self, job_id: str, **fields: Any) -> None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return  # expired/purged mid-flight (or unknown id) -- safe no-op
+            for k, v in fields.items():
+                setattr(job, k, v)
+            job.updated_at = self._clock()
+
+    def mark_processing(self, job_id: str) -> None:
+        self._update(job_id, status="processing", message="Đang xử lý OCR / trích xuất BCTC...")
+
+    def update_progress(self, job_id: str, current_page: int, total_pages: int) -> None:
+        percent = round((current_page / total_pages) * 100.0, 1) if total_pages else 0.0
+        self._update(
+            job_id,
+            current_page=current_page,
+            total_pages=total_pages,
+            progress_percent=percent,
+            message=f"Đang đọc BCTC: trang {current_page} / {total_pages}",
+        )
+
+    def mark_completed(self, job_id: str, result: Dict[str, Any]) -> None:
+        self._update(job_id, status="completed", result=result, progress_percent=100.0, message="Hoàn tất trích xuất BCTC.")
+
+    def mark_failed(self, job_id: str, error: Dict[str, Any]) -> None:
+        self._update(job_id, status="failed", error=error, message=error.get("message") or "Xử lý BCTC thất bại.")
+
+
+FINANCIAL_JOB_MANAGER = FinancialJobManager()
+
+
+def _run_financial_preview_job(job_id: str, raw_bytes: bytes, filename: str, case_id: Optional[str]) -> None:
+    """Executes the (unchanged) financial preview pipeline on a background thread.
+    Client disconnects have no effect here: this function has no reference to the
+    HTTP connection at all, so it keeps running to completion/failure regardless."""
+    FINANCIAL_JOB_MANAGER.mark_processing(job_id)
+
+    def _on_progress(current_page: int, _completed_count: int, total_pages: int) -> None:
+        FINANCIAL_JOB_MANAGER.update_progress(job_id, current_page, total_pages)
+
+    try:
+        result_payload, status_code = process_financial_pdf_preview(
+            raw_bytes, filename, case_id=case_id, progress_callback=_on_progress,
+        )
+    except Exception:
+        # Defense in depth only -- process_financial_pdf_preview already catches
+        # every real failure into a safe (payload, status_code) error tuple below.
+        logger.exception("Unexpected uncaught error running financial preview job_id=%s", job_id)
+        FINANCIAL_JOB_MANAGER.mark_failed(job_id, {
+            "error_type": "InternalError",
+            "message": "Lỗi xử lý BCTC không xác định.",
+        })
+        return
+
+    if status_code == 200 and result_payload.get("status") == "success":
+        FINANCIAL_JOB_MANAGER.mark_completed(job_id, result_payload)
+    else:
+        FINANCIAL_JOB_MANAGER.mark_failed(job_id, {
+            "error_type": result_payload.get("error_type"),
+            "message": result_payload.get("message"),
+        })
+
+
 FINANCIAL_ITEM_LABELS = {
     "net_revenue": "Doanh thu thuần về bán hàng và CCDV",
     "cogs": "Giá vốn hàng bán",
@@ -4191,7 +4410,12 @@ FINANCIAL_ITEM_LABELS = {
 }
 
 
-def process_financial_pdf_preview(raw_bytes: bytes, filename: str, case_id: str | None = None) -> tuple[dict[str, Any], int]:
+def process_financial_pdf_preview(
+    raw_bytes: bytes,
+    filename: str,
+    case_id: str | None = None,
+    progress_callback: Optional[Callable[[int, int, int], None]] = None,
+) -> tuple[dict[str, Any], int]:
     """Execute Ingestion -> Financial Extraction -> Grounding Audit -> Deterministic Mapping.
     
     Guarantees:
@@ -4207,7 +4431,7 @@ def process_financial_pdf_preview(raw_bytes: bytes, filename: str, case_id: str 
             temp_path = tmp.name
 
         # 1. Router Ingestion
-        ingestion_res = DocumentIngestionRouter.ingest_document(temp_path)
+        ingestion_res = DocumentIngestionRouter.ingest_document(temp_path, progress_callback=progress_callback)
 
         # 2. Financial Extraction via GreenNode
         extractor = FinancialDocumentExtractor()
@@ -5324,6 +5548,26 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
             })
             return
 
+        if path.startswith('/api/financial_preview_job/'):
+            job_id = path[len('/api/financial_preview_job/'):].strip()
+            if not job_id:
+                self._send_json({
+                    "status": "error",
+                    "error_type": "InvalidInputError",
+                    "message": "Thiếu job_id."
+                }, status_code=400)
+                return
+            snapshot = FINANCIAL_JOB_MANAGER.get_job_snapshot(job_id)
+            if snapshot is None:
+                self._send_json({
+                    "status": "error",
+                    "error_type": "JobNotFoundError",
+                    "message": f"Không tìm thấy công việc xử lý BCTC với ID '{job_id}' (có thể đã hết hạn)."
+                }, status_code=404)
+                return
+            self._send_json(snapshot, status_code=200)
+            return
+
         if path.startswith('/download/'):
             filename = os.path.basename(path)
             file_path = os.path.join("output", filename)
@@ -5606,8 +5850,23 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             target_cid = body_json.get("case_id") or ACTIVE_CASE_ID
-            res_payload, status_code = process_financial_pdf_preview(raw_bytes, os.path.basename(fname), case_id=target_cid)
-            self._send_json(res_payload, status_code=status_code)
+
+            # Async background job: never make the browser/gateway wait for the
+            # full OCR run (a large scanned BCTC against a 5 RPM Vision quota can
+            # take far longer than any HTTP request lifetime). The job keeps
+            # running to completion on its own thread regardless of whether the
+            # client that created it stays connected or polls again.
+            job_id = FINANCIAL_JOB_MANAGER.create_job(case_id=target_cid)
+            threading.Thread(
+                target=_run_financial_preview_job,
+                args=(job_id, raw_bytes, os.path.basename(fname), target_cid),
+                daemon=True,
+            ).start()
+            self._send_json({
+                "status": "accepted",
+                "job_id": job_id,
+                "message": "Đã tiếp nhận tệp BCTC, đang xử lý OCR trong nền.",
+            }, status_code=202)
             return
 
         if path == '/api/confirm_financial_preview':
