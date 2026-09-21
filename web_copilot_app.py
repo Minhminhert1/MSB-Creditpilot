@@ -16,6 +16,7 @@ Tính năng nổi bật:
 import os
 import sys
 import json
+import logging
 import shutil
 import urllib.parse
 import uuid
@@ -33,6 +34,22 @@ sys.path.insert(0, ".")
 sys.path.insert(0, "msb_eb_copilot")
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
+
+logger = logging.getLogger(__name__)
+
+
+def _greennode_secrets_for_log_redaction() -> list[str]:
+    """Resolved GreenNode/AI-platform API key values (same env-var precedence used
+    by QwenVisionOCREngine), used ONLY to proactively redact them from diagnostic
+    log messages -- never logged or exposed otherwise here."""
+    return [
+        v for v in (
+            os.getenv("LLM_API_KEY"),
+            os.getenv("AI_PLATFORM_API_KEY"),
+            os.getenv("GREENNODE_API_KEY"),
+        )
+        if v
+    ]
 
 from msb_eb_copilot.src.credit_committee_prep import CreditCommitteePrepEngine, CommitteeQuestionCard
 from msb_eb_copilot.src.narrative import (
@@ -133,6 +150,8 @@ from msb_eb_copilot.src.ingestion.pdf_ocr import (
     OCRTimeoutError,
     OCRServiceError,
     OCRIngestionError,
+    _safe_ocr_error_fields,
+    _sanitize_exception_message_in_place,
 )
 from msb_eb_copilot.src.extraction.legal_extraction import (
     LegalDocumentExtractor,
@@ -3874,7 +3893,18 @@ def process_legal_pdf_preview(raw_bytes: bytes, filename: str, case_id: str | No
             "error_type": "OCRTimeoutError",
             "message": "Quá trình nhận diện OCR hình ảnh vượt quá thời gian chờ (Timeout). Vui lòng thử lại với tài liệu có dung lượng nhỏ hơn hoặc kiểm tra kết nối mạng."
         }, 504
-    except OCRServiceError:
+    except OCRServiceError as exc:
+        # Surface the chained GreenNode/OCR root cause in AgentBase logs (safe fields
+        # only: no API key, no base64 image, no document contents). User-facing
+        # message/status below is unchanged.
+        root_cause = exc.__cause__ if exc.__cause__ is not None else exc
+        _redact_secrets = _greennode_secrets_for_log_redaction()
+        _sanitize_exception_message_in_place(root_cause, _redact_secrets)
+        logger.exception(
+            "OCRServiceError while processing legal PDF preview (case_id=%s): %s",
+            case_id,
+            _safe_ocr_error_fields(root_cause, page_num=None, model=None, secrets_to_redact=_redact_secrets),
+        )
         return {
             "status": "error",
             "error_type": "OCRServiceError",
@@ -4306,7 +4336,18 @@ def process_financial_pdf_preview(raw_bytes: bytes, filename: str, case_id: str 
             "error_type": "OCRTimeoutError",
             "message": "Quá trình nhận diện OCR tài liệu BCTC quá thời gian chờ (Timeout)."
         }, 504
-    except OCRServiceError:
+    except OCRServiceError as exc:
+        # Surface the chained GreenNode/OCR root cause in AgentBase logs (safe fields
+        # only: no API key, no base64 image, no document contents). User-facing
+        # message/status below is unchanged.
+        root_cause = exc.__cause__ if exc.__cause__ is not None else exc
+        _redact_secrets = _greennode_secrets_for_log_redaction()
+        _sanitize_exception_message_in_place(root_cause, _redact_secrets)
+        logger.exception(
+            "OCRServiceError while processing financial PDF preview (case_id=%s): %s",
+            case_id,
+            _safe_ocr_error_fields(root_cause, page_num=None, model=None, secrets_to_redact=_redact_secrets),
+        )
         return {
             "status": "error",
             "error_type": "OCRServiceError",

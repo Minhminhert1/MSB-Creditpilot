@@ -27,6 +27,7 @@ Tuân thủ nghiêm ngặt các nguyên tắc:
 import os
 import io
 import base64
+import logging
 import threading
 import concurrent.futures
 from abc import ABC, abstractmethod
@@ -36,6 +37,103 @@ from pydantic import BaseModel, Field
 import pypdf
 import pypdfium2 as pdfium
 from openai import OpenAI, APIError, APITimeoutError, APIConnectionError
+
+logger = logging.getLogger(__name__)
+
+# Hard cap on how much of an exception's own message text we ever log, as
+# defense-in-depth against a pathological upstream error response echoing back
+# request content. This is independent of, and in addition to, only ever reading
+# an explicit allow-list of attributes off the exception (never the raw request/
+# response objects, never the messages/base64 image payload we sent).
+_MAX_LOGGED_ERROR_MESSAGE_CHARS = 300
+_REDACTED_PLACEHOLDER = "***REDACTED***"
+
+
+def _redact_known_secrets(text: str, secrets: Optional[List[str]]) -> str:
+    """Removes any occurrence of a known secret value (e.g. the resolved API key)
+    from a free-text string before it is ever logged. This is active redaction —
+    not just truncation — so a secret is scrubbed even if it appears at the very
+    start of an exception's own message (e.g. a low-level connection error that
+    happens to echo the outgoing Authorization header)."""
+    if not text or not secrets:
+        return text
+    redacted = text
+    for secret in secrets:
+        if secret:
+            redacted = redacted.replace(secret, _REDACTED_PLACEHOLDER)
+    return redacted
+
+
+def _sanitize_exception_message_in_place(exc: BaseException, secrets: Optional[List[str]]) -> None:
+    """Mutates exc's own message/args in place so str(exc) — and therefore the
+    traceback logger.exception() independently renders for it via sys.exc_info()
+    — can never surface a known secret. A real traceback (correct file/line/call
+    stack) is still attached and still useful for debugging; only the exception's
+    own text is sanitized, and only if a known secret was actually found in it (in
+    the normal case, with no secret present, this is a no-op and the message is
+    completely unchanged)."""
+    if not secrets:
+        return
+    original = str(exc)
+    redacted = _redact_known_secrets(original, secrets)
+    if redacted == original:
+        return
+    try:
+        exc.args = (redacted,)
+    except Exception:
+        pass
+    if hasattr(exc, "message"):
+        try:
+            exc.message = redacted
+        except Exception:
+            pass
+
+
+def _safe_ocr_error_fields(
+    exc: BaseException,
+    page_num: Optional[int] = None,
+    model: Optional[str] = None,
+    secrets_to_redact: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Builds a diagnostic dict for logging a GreenNode OCR call failure.
+
+    SAFE BY CONSTRUCTION: only reads a fixed allow-list of attributes that the
+    openai SDK's exception classes expose (status_code, request_id, code/type,
+    a Retry-After response header, and the exception's own str(), redacted and
+    truncated). Never reads/logs: API keys, Authorization headers, the base64
+    image payload, document/OCR text, or the raw request/response objects (which
+    could contain the full request body).
+
+    `secrets_to_redact` should be the caller's actual resolved API key(s) (e.g.
+    `self.client.api_key`), which is proactively scrubbed from the free-text
+    message field even if it happens to appear there.
+    """
+    status_code = getattr(exc, "status_code", None)
+    request_id = getattr(exc, "request_id", None)
+    error_code = getattr(exc, "code", None) or getattr(exc, "type", None)
+
+    retry_after = None
+    response = getattr(exc, "response", None)
+    if response is not None:
+        try:
+            retry_after = response.headers.get("Retry-After")
+        except Exception:
+            retry_after = None
+
+    message = _redact_known_secrets(str(exc), secrets_to_redact)
+    if len(message) > _MAX_LOGGED_ERROR_MESSAGE_CHARS:
+        message = message[:_MAX_LOGGED_ERROR_MESSAGE_CHARS] + "...(truncated)"
+
+    return {
+        "page_num": page_num,
+        "model": model,
+        "exception_class": type(exc).__name__,
+        "http_status_code": status_code,
+        "request_id": request_id,
+        "error_code": error_code,
+        "retry_after": retry_after,
+        "message": message,
+    }
 
 
 # ==============================================================================
@@ -180,6 +278,13 @@ class QwenVisionOCREngine(BaseOCREngine):
             timeout=self.timeout
         )
 
+    def _known_secrets(self) -> List[str]:
+        """The actual resolved secret value(s) for this engine instance, used only
+        to proactively redact them from diagnostic log messages (see
+        _safe_ocr_error_fields) -- never logged, read, or exposed otherwise here."""
+        api_key = getattr(self.client, "api_key", None)
+        return [api_key] if api_key else []
+
     def ocr_page(self, base64_png: str, page_num: int) -> str:
         messages = [
             {"role": "system", "content": self.OCR_SYSTEM_PROMPT},
@@ -226,10 +331,28 @@ class QwenVisionOCREngine(BaseOCREngine):
 
             return content if content is not None else ""
         except APITimeoutError as exc:
+            secrets = self._known_secrets()
+            _sanitize_exception_message_in_place(exc, secrets)
+            logger.exception(
+                "GreenNode OCR request timed out (fail-closed, no retry/behavior change): %s",
+                _safe_ocr_error_fields(exc, page_num, self.model, secrets_to_redact=secrets),
+            )
             raise OCRTimeoutError(f"Thời gian chờ OCR trang {page_num} vượt quá {self.timeout}s: {str(exc)}") from exc
         except (APIError, APIConnectionError) as exc:
+            secrets = self._known_secrets()
+            _sanitize_exception_message_in_place(exc, secrets)
+            logger.exception(
+                "GreenNode OCR API/connection error: %s",
+                _safe_ocr_error_fields(exc, page_num, self.model, secrets_to_redact=secrets),
+            )
             raise OCRServiceError(f"Lỗi dịch vụ OCR khi xử lý trang {page_num}: {str(exc)}") from exc
         except Exception as exc:
+            secrets = self._known_secrets()
+            _sanitize_exception_message_in_place(exc, secrets)
+            logger.exception(
+                "Unexpected error during GreenNode OCR call: %s",
+                _safe_ocr_error_fields(exc, page_num, self.model, secrets_to_redact=secrets),
+            )
             raise OCRServiceError(f"Lỗi không xác định khi gọi OCR trang {page_num}: {str(exc)}") from exc
 
 

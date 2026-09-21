@@ -10,6 +10,7 @@ Bảo đảm:
   tagged_text -> Locked LegalDocumentExtractor.
 """
 
+import logging
 import os
 import json
 import pytest
@@ -30,7 +31,8 @@ from msb_eb_copilot.src.ingestion.pdf_ocr import (
     OCRServiceError,
     OCRTimeoutError,
     OCRNoTextError,
-    OCRPageCountError
+    OCRPageCountError,
+    _safe_ocr_error_fields,
 )
 from msb_eb_copilot.src.extraction.legal_extraction import (
     LegalDocumentExtractor,
@@ -164,6 +166,136 @@ def test_qwen_engine_api_error_raises_service_error():
     with patch.object(engine.client.chat.completions, "create", side_effect=APIError("Internal Server Error", request=None, body=None)):
         with pytest.raises(OCRServiceError, match="Lỗi dịch vụ OCR"):
             engine.ocr_page("dummy_b64", page_num=1)
+
+
+# ==============================================================================
+# 2b. SAFE DIAGNOSTIC LOGGING: exceptions are logged, but never leak secrets
+# ==============================================================================
+FAKE_API_KEY = "sk-LIVE-super-secret-do-not-log-abcdef123456"
+FAKE_BASE64_IMAGE = "AAAABASE64FAKEIMAGEPAYLOAD" * 50  # stand-in for a real page image
+
+
+def test_timeout_error_is_logged_with_safe_fields_and_no_secrets(caplog):
+    from openai import APITimeoutError
+
+    engine = QwenVisionOCREngine(api_key=FAKE_API_KEY)
+    with patch.object(engine.client.chat.completions, "create", side_effect=APITimeoutError(request=None)):
+        with caplog.at_level(logging.ERROR, logger="msb_eb_copilot.src.ingestion.pdf_ocr"):
+            with pytest.raises(OCRTimeoutError):
+                engine.ocr_page(FAKE_BASE64_IMAGE, page_num=7)
+
+    assert len(caplog.records) == 1
+    record = caplog.records[0]
+    assert record.levelno == logging.ERROR
+    assert record.exc_info is not None  # logger.exception() attaches traceback
+
+    log_text = caplog.text
+    # Safe diagnostic fields must be present.
+    assert "'page_num': 7" in log_text
+    assert f"'model': '{engine.model}'" in log_text
+    assert "'exception_class': 'APITimeoutError'" in log_text
+    # Secrets/payloads must never appear anywhere in the emitted log text.
+    assert FAKE_API_KEY not in log_text
+    assert FAKE_BASE64_IMAGE not in log_text
+    assert "Authorization" not in log_text
+    assert "Bearer" not in log_text
+
+
+def test_api_error_is_logged_with_safe_fields_and_no_secrets(caplog):
+    from openai import APIError
+
+    engine = QwenVisionOCREngine(api_key=FAKE_API_KEY)
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=APIError("Internal Server Error", request=None, body=None),
+    ):
+        with caplog.at_level(logging.ERROR, logger="msb_eb_copilot.src.ingestion.pdf_ocr"):
+            with pytest.raises(OCRServiceError):
+                engine.ocr_page(FAKE_BASE64_IMAGE, page_num=3)
+
+    log_text = caplog.text
+    assert "'exception_class': 'APIError'" in log_text
+    assert "'page_num': 3" in log_text
+    assert FAKE_API_KEY not in log_text
+    assert FAKE_BASE64_IMAGE not in log_text
+
+
+def test_unexpected_exception_is_logged_with_safe_fields_and_no_secrets(caplog):
+    engine = QwenVisionOCREngine(api_key=FAKE_API_KEY)
+    boom = RuntimeError(f"socket reset while sending Authorization: Bearer {FAKE_API_KEY}")
+    with patch.object(engine.client.chat.completions, "create", side_effect=boom):
+        with caplog.at_level(logging.ERROR, logger="msb_eb_copilot.src.ingestion.pdf_ocr"):
+            with pytest.raises(OCRServiceError):
+                engine.ocr_page(FAKE_BASE64_IMAGE, page_num=9)
+
+    log_text = caplog.text
+    assert "'exception_class': 'RuntimeError'" in log_text
+    assert "'page_num': 9" in log_text
+    # Even though the *cause* of this synthetic exception's own message contains
+    # the fake key, the logged message is truncated to _MAX_LOGGED_ERROR_MESSAGE_CHARS
+    # and the test still asserts the raw secret never survives into the log output.
+    assert FAKE_API_KEY not in log_text
+    assert FAKE_BASE64_IMAGE not in log_text
+
+
+def test_safe_ocr_error_fields_direct_unit_contract():
+    """Unit-level contract test for the field-extraction helper itself."""
+    exc = RuntimeError("boom")
+    fields = _safe_ocr_error_fields(exc, page_num=2, model="qwen/qwen3.6-flash")
+
+    assert fields == {
+        "page_num": 2,
+        "model": "qwen/qwen3.6-flash",
+        "exception_class": "RuntimeError",
+        "http_status_code": None,
+        "request_id": None,
+        "error_code": None,
+        "retry_after": None,
+        "message": "boom",
+    }
+    # Exactly the allow-listed keys -- nothing extra (e.g. no 'request', 'body',
+    # 'headers', 'api_key') can silently sneak into the log payload.
+    assert set(fields.keys()) == {
+        "page_num", "model", "exception_class", "http_status_code",
+        "request_id", "error_code", "retry_after", "message",
+    }
+
+
+def test_safe_ocr_error_fields_extracts_status_code_request_id_and_retry_after():
+    """Simulates a rich openai APIStatusError-style exception (e.g. 429 rate limit)
+    carrying a Retry-After header alongside an unrelated, sensitive-looking header,
+    and asserts only the allow-listed Retry-After value is ever extracted."""
+    fake_response = MagicMock()
+    fake_response.status_code = 429
+    fake_response.headers = {
+        "Retry-After": "12",
+        "Authorization": f"Bearer {FAKE_API_KEY}",
+        "x-api-key": FAKE_API_KEY,
+    }
+
+    class _FakeRateLimitError(Exception):
+        status_code = 429
+        request_id = "req_abc123"
+        code = "rate_limit_exceeded"
+        response = fake_response
+
+    exc = _FakeRateLimitError("Rate limit exceeded")
+    fields = _safe_ocr_error_fields(exc, page_num=1, model="qwen/qwen3.6-flash")
+
+    assert fields["http_status_code"] == 429
+    assert fields["request_id"] == "req_abc123"
+    assert fields["error_code"] == "rate_limit_exceeded"
+    assert fields["retry_after"] == "12"
+    # Only the Retry-After header value is read -- nothing else off the exception's
+    # response/headers (Authorization, x-api-key) ever enters the returned dict.
+    assert FAKE_API_KEY not in json.dumps(fields, default=str)
+
+
+def test_safe_ocr_error_fields_truncates_overlong_messages():
+    exc = RuntimeError("x" * 5000)
+    fields = _safe_ocr_error_fields(exc, page_num=1, model="m")
+    assert len(fields["message"]) <= 320
+    assert fields["message"].endswith("...(truncated)")
 
 
 # ==============================================================================

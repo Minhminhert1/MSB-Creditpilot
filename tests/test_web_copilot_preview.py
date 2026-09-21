@@ -22,6 +22,7 @@ import base64
 import copy
 import io
 import json
+import logging
 import os
 import tempfile
 import pytest
@@ -30,11 +31,13 @@ from unittest.mock import patch, MagicMock
 import web_copilot_app
 from web_copilot_app import (
     process_legal_pdf_preview,
+    process_financial_pdf_preview,
     MAX_PREVIEW_UPLOAD_SIZE,
     CopilotHTTPHandler,
     CASES_DB,
     ACTIVE_CASE_ID,
 )
+from msb_eb_copilot.src.ingestion.pdf_ocr import OCRServiceError
 from msb_eb_copilot.src.ingestion.router import DocumentIngestionResult
 from msb_eb_copilot.src.extraction.legal_extraction import (
     EvidenceField,
@@ -385,6 +388,93 @@ def test_encrypted_pdf_returns_safe_vietnamese_message(snapshot_case_state):
     assert res["status"] == "error"
     assert res["error_type"] == "PDFEncryptedError"
     assert "mật khẩu" in res["message"]
+
+
+# ==============================================================================
+# 7. SAFE DIAGNOSTIC LOGGING FOR OCRServiceError (AgentBase visibility, no secrets)
+# ==============================================================================
+_FAKE_GREENNODE_KEY = "sk-LIVE-web-layer-should-never-log-this-abc123"
+
+
+def _raise_chained_ocr_service_error(*args, **kwargs):
+    """Simulates DocumentIngestionRouter.ingest_document() failing because the
+    underlying GreenNode OCR call failed -- the low-level exception's own message
+    pathologically contains what looks like a leaked secret, to prove the web
+    layer's logging never lets it through."""
+    try:
+        raise RuntimeError(
+            f"connection reset while sending Authorization: Bearer {_FAKE_GREENNODE_KEY}"
+        )
+    except RuntimeError as root:
+        raise OCRServiceError("Lỗi dịch vụ OCR khi xử lý trang 1: boom") from root
+
+
+def test_legal_preview_ocr_service_error_is_logged_without_secrets(snapshot_case_state, caplog, monkeypatch):
+    """5. web_copilot_app.py must log the chained OCRServiceError (visible in
+    AgentBase logs) but must never leak the underlying secret, and the
+    user-facing Vietnamese response must remain exactly unchanged."""
+    # Mirrors production: the resolved GreenNode API key is the one actually
+    # configured via env var, which is what _greennode_secrets_for_log_redaction()
+    # reads to know what to scrub.
+    monkeypatch.setenv("LLM_API_KEY", _FAKE_GREENNODE_KEY)
+    with open(LEGAL_REGISTRATION_FIXTURE_PDF, "rb") as f:
+        raw_bytes = f.read()
+
+    with patch("web_copilot_app.DocumentIngestionRouter.ingest_document", side_effect=_raise_chained_ocr_service_error):
+        with caplog.at_level(logging.ERROR, logger="web_copilot_app"):
+            res, status_code = process_legal_pdf_preview(raw_bytes, "legal.pdf", case_id="PSD")
+
+    # User-facing behavior is unchanged (requirement 7).
+    assert status_code == 502
+    assert res == {
+        "status": "error",
+        "error_type": "OCRServiceError",
+        "message": "Dịch vụ OCR hình ảnh gặp sự cố kết nối. Vui lòng thử lại sau.",
+    }
+
+    log_text = caplog.text
+    assert "OCRServiceError" in log_text
+    assert "PSD" in log_text  # case_id context is present for AgentBase triage
+    assert _FAKE_GREENNODE_KEY not in log_text
+    assert "***REDACTED***" in log_text  # the secret was actively scrubbed, not just absent
+
+
+def test_financial_preview_ocr_service_error_is_logged_without_secrets(snapshot_case_state, caplog, monkeypatch):
+    monkeypatch.setenv("LLM_API_KEY", _FAKE_GREENNODE_KEY)
+    with open(LEGAL_REGISTRATION_FIXTURE_PDF, "rb") as f:
+        raw_bytes = f.read()
+
+    with patch("web_copilot_app.DocumentIngestionRouter.ingest_document", side_effect=_raise_chained_ocr_service_error):
+        with caplog.at_level(logging.ERROR, logger="web_copilot_app"):
+            res, status_code = process_financial_pdf_preview(raw_bytes, "bctc.pdf", case_id="PSD")
+
+    assert status_code == 502
+    assert res == {
+        "status": "error",
+        "error_type": "OCRServiceError",
+        "message": "Dịch vụ OCR hình ảnh gặp sự cố kết nối.",
+    }
+
+    log_text = caplog.text
+    assert "OCRServiceError" in log_text
+    assert _FAKE_GREENNODE_KEY not in log_text
+    assert "***REDACTED***" in log_text
+
+
+def test_ocr_service_error_log_record_has_exception_traceback_attached(snapshot_case_state, caplog):
+    """The chained exception must be genuinely visible (a real traceback), not just
+    a bare message -- this is what makes it show up meaningfully in AgentBase logs
+    instead of only the generic 502 the client sees."""
+    with open(LEGAL_REGISTRATION_FIXTURE_PDF, "rb") as f:
+        raw_bytes = f.read()
+
+    with patch("web_copilot_app.DocumentIngestionRouter.ingest_document", side_effect=_raise_chained_ocr_service_error):
+        with caplog.at_level(logging.ERROR, logger="web_copilot_app"):
+            process_legal_pdf_preview(raw_bytes, "legal.pdf", case_id="PSD")
+
+    matching = [r for r in caplog.records if "OCRServiceError" in r.getMessage()]
+    assert len(matching) == 1
+    assert matching[0].exc_info is not None
 
 
 def test_audit_error_returns_safe_vietnamese_message(snapshot_case_state):
