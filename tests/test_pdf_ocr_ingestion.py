@@ -16,6 +16,7 @@ import json
 import pytest
 import pypdf
 import pypdfium2 as pdfium
+from typing import List, Optional
 from unittest.mock import patch, MagicMock
 
 from msb_eb_copilot.src.ingestion.pdf_ocr import (
@@ -33,6 +34,15 @@ from msb_eb_copilot.src.ingestion.pdf_ocr import (
     OCRNoTextError,
     OCRPageCountError,
     _safe_ocr_error_fields,
+    OCRRateLimiter,
+    get_shared_ocr_rate_limiter,
+    reset_shared_ocr_rate_limiter_for_tests,
+    _ocr_rate_limit_enabled_from_env,
+    _ocr_rpm_limit_from_env,
+    _compute_rate_limit_wait_seconds,
+    _parse_retry_after_seconds,
+    _parse_resets_in_seconds,
+    DEFAULT_OCR_RPM_LIMIT,
 )
 from msb_eb_copilot.src.extraction.legal_extraction import (
     LegalDocumentExtractor,
@@ -45,6 +55,19 @@ SCANNED_FIXTURE_PDF = os.path.join(FIXTURES_DIR, "scanned_legal_fixture.pdf")
 SAMPLE_SINGLE_PAGE_PDF = os.path.join(FIXTURES_DIR, "sample_single_page.pdf")
 ENCRYPTED_PDF = os.path.join(FIXTURES_DIR, "encrypted.pdf")
 BLANK_PDF = os.path.join(FIXTURES_DIR, "blank.pdf")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_shared_ocr_rate_limiter(monkeypatch):
+    """The process-wide proactive rate limiter singleton (get_shared_ocr_rate_limiter)
+    would otherwise be shared across every test in this file/session. Force it
+    disabled by default so unrelated tests constructing a real QwenVisionOCREngine
+    never incur a real wait; tests that specifically exercise rate limiting
+    override OCR_RATE_LIMIT_ENABLED/OCR_RPM_LIMIT locally and reset again."""
+    monkeypatch.setenv("OCR_RATE_LIMIT_ENABLED", "false")
+    reset_shared_ocr_rate_limiter_for_tests()
+    yield
+    reset_shared_ocr_rate_limiter_for_tests()
 
 
 # Dummy engine for unit tests without network calls
@@ -296,6 +319,392 @@ def test_safe_ocr_error_fields_truncates_overlong_messages():
     fields = _safe_ocr_error_fields(exc, page_num=1, model="m")
     assert len(fields["message"]) <= 320
     assert fields["message"].endswith("...(truncated)")
+
+
+# ==============================================================================
+# 2c. GREENNODE 429 RATE-LIMIT RETRY + PROACTIVE RPM PACING
+# ==============================================================================
+import httpx2
+import openai as _openai_pkg
+
+
+def _make_status_error(exc_cls, status_code: int, message: str, headers: Optional[dict] = None):
+    """Builds a real openai SDK exception (e.g. RateLimitError/BadRequestError) with
+    a genuine httpx2.Response so .status_code / .response.headers behave exactly
+    as they do against the real GreenNode API."""
+    req = httpx2.Request("POST", "https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1/chat/completions")
+    resp = httpx2.Response(status_code, headers=headers or {}, request=req)
+    return exc_cls(message, response=resp, body=None)
+
+
+def _make_success_response(text: str = "OCR'd text"):
+    resp = MagicMock()
+    resp.choices = [MagicMock(message=MagicMock(content=text))]
+    resp.usage = None
+    return resp
+
+
+class _FakeClock:
+    """Deterministic monotonic clock + sleep double: sleep() advances the clock by
+    exactly the requested amount instead of actually waiting, so tests never sleep
+    for real seconds."""
+
+    def __init__(self, start: float = 0.0):
+        self.now = start
+        self.sleeps: List[float] = []
+
+    def time(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _rl_engine(rate_limiter=None, sleep_fn=None):
+    """A QwenVisionOCREngine with the shared process-wide rate limiter bypassed by
+    an explicit injected one (or disabled), and a mockable sleep function for the
+    429-retry wait -- fully isolated from real time and from other tests."""
+    if rate_limiter is None:
+        rate_limiter = OCRRateLimiter(rpm_limit=999999, enabled=False)
+    return QwenVisionOCREngine(api_key=FAKE_API_KEY, rate_limiter=rate_limiter, sleep_fn=sleep_fn or MagicMock())
+
+
+# --- A/B/C/D: 429 retry-with-wait behavior -----------------------------------
+
+def test_429_with_retry_after_header_waits_buffered_retry_after_and_succeeds():
+    """A. 429 with Retry-After=2 -> waits ~3s (2 + 1s safety buffer) -> retries the
+    SAME page -> succeeds."""
+    err_429 = _make_status_error(
+        _openai_pkg.RateLimitError, 429,
+        "model rpm limit exceeded (5/5), resets in 2s",
+        headers={"Retry-After": "2"},
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[err_429, _make_success_response("hello page 1")],
+    ) as mock_create:
+        result = engine.ocr_page(FAKE_BASE64_IMAGE, page_num=1)
+
+    assert result == "hello page 1"
+    assert mock_create.call_count == 2  # same page retried, not restarted document
+    sleep_mock.assert_called_once()
+    (waited,), _ = sleep_mock.call_args
+    assert waited == pytest.approx(3.0)  # 2 + 1s safety buffer
+
+
+def test_429_with_resets_in_message_only_parses_and_waits_buffered_and_succeeds():
+    """B. 429 with no Retry-After but message 'resets in 29s' -> parses 29 -> waits
+    30s (29 + 1s buffer) -> retries successfully."""
+    err_429 = _make_status_error(
+        _openai_pkg.RateLimitError, 429,
+        "model rpm limit exceeded (5/5), resets in 29s",
+        headers={},  # no Retry-After header
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[err_429, _make_success_response("hello page 2")],
+    ) as mock_create:
+        result = engine.ocr_page(FAKE_BASE64_IMAGE, page_num=2)
+
+    assert result == "hello page 2"
+    assert mock_create.call_count == 2
+    sleep_mock.assert_called_once()
+    (waited,), _ = sleep_mock.call_args
+    assert waited == pytest.approx(30.0)
+
+
+def test_429_retry_after_header_takes_priority_over_resets_in_message():
+    """C. When BOTH a Retry-After header and a 'resets in Ns' message are present,
+    the header wins (2 + 1 = 3s), not the message's 29s."""
+    err_429 = _make_status_error(
+        _openai_pkg.RateLimitError, 429,
+        "model rpm limit exceeded (5/5), resets in 29s",
+        headers={"Retry-After": "2"},
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[err_429, _make_success_response("ok")],
+    ):
+        engine.ocr_page(FAKE_BASE64_IMAGE, page_num=3)
+
+    (waited,), _ = sleep_mock.call_args
+    assert waited == pytest.approx(3.0)
+
+
+def test_429_exhausts_all_4_attempts_then_raises_ocr_service_error():
+    """D. All 4 attempts hit 429 -> OCRServiceError raised, exception chain preserved,
+    and exactly 4 calls were made to the underlying API (same page, never restarted)."""
+    err_429 = _make_status_error(
+        _openai_pkg.RateLimitError, 429,
+        "model rpm limit exceeded (5/5), resets in 1s",
+        headers={"Retry-After": "1"},
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create", side_effect=[err_429, err_429, err_429, err_429],
+    ) as mock_create:
+        with pytest.raises(OCRServiceError) as exc_info:
+            engine.ocr_page(FAKE_BASE64_IMAGE, page_num=4)
+
+    assert mock_create.call_count == 4
+    assert exc_info.value.__cause__ is err_429
+    # Only 3 waits happen (before attempts 2, 3, 4); the 4th failure raises instead
+    # of waiting/retrying again.
+    assert sleep_mock.call_count == 3
+
+
+# --- E/F/G: non-retryable HTTP statuses --------------------------------------
+
+@pytest.mark.parametrize(
+    "exc_cls,status_code",
+    [
+        (_openai_pkg.BadRequestError, 400),
+        (_openai_pkg.AuthenticationError, 401),
+        (_openai_pkg.PermissionDeniedError, 403),
+    ],
+)
+def test_non_429_client_errors_are_never_retried(exc_cls, status_code):
+    """E/F/G. HTTP 400/401/403 must never be retried -- exactly one call, immediate
+    OCRServiceError."""
+    err = _make_status_error(exc_cls, status_code, f"error {status_code}")
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(engine.client.chat.completions, "create", side_effect=err) as mock_create:
+        with pytest.raises(OCRServiceError):
+            engine.ocr_page(FAKE_BASE64_IMAGE, page_num=5)
+
+    assert mock_create.call_count == 1
+    sleep_mock.assert_not_called()
+
+
+# --- K: no secret leakage during rate-limit retries/exhaustion ---------------
+
+def test_rate_limit_retry_logging_never_leaks_secrets(caplog):
+    err_429 = _make_status_error(
+        _openai_pkg.RateLimitError, 429,
+        f"model rpm limit exceeded (5/5), resets in 2s -- key={FAKE_API_KEY}",
+        headers={"Retry-After": "2"},
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(
+        engine.client.chat.completions, "create",
+        side_effect=[err_429, _make_success_response("ok")],
+    ):
+        with caplog.at_level(logging.WARNING, logger="msb_eb_copilot.src.ingestion.pdf_ocr"):
+            engine.ocr_page(FAKE_BASE64_IMAGE, page_num=6)
+
+    log_text = caplog.text
+    assert "OCR rate limited page=6" in log_text
+    assert "wait_seconds=3" in log_text
+    assert "source=retry_after" in log_text
+    assert FAKE_API_KEY not in log_text
+    assert FAKE_BASE64_IMAGE not in log_text
+
+
+def test_rate_limit_exhaustion_logging_never_leaks_secrets(caplog):
+    err_429 = _make_status_error(
+        _openai_pkg.RateLimitError, 429,
+        f"model rpm limit exceeded (5/5), resets in 1s -- key={FAKE_API_KEY}",
+        headers={"Retry-After": "1"},
+    )
+    sleep_mock = MagicMock()
+    engine = _rl_engine(sleep_fn=sleep_mock)
+
+    with patch.object(engine.client.chat.completions, "create", side_effect=[err_429] * 4):
+        with caplog.at_level(logging.ERROR, logger="msb_eb_copilot.src.ingestion.pdf_ocr"):
+            with pytest.raises(OCRServiceError):
+                engine.ocr_page(FAKE_BASE64_IMAGE, page_num=7)
+
+    log_text = caplog.text
+    assert FAKE_API_KEY not in log_text
+    assert FAKE_BASE64_IMAGE not in log_text
+    assert "Authorization" not in log_text
+
+
+# --- H/I/J: proactive RPM limiter --------------------------------------------
+
+def test_proactive_limiter_allows_up_to_rpm_limit_without_waiting():
+    """H (part 1). The first `rpm_limit` acquisitions never sleep."""
+    clock = _FakeClock()
+    limiter = OCRRateLimiter(rpm_limit=5, enabled=True, clock=clock.time, sleep_fn=clock.sleep)
+    for _ in range(5):
+        limiter.acquire()
+    assert clock.sleeps == []
+
+
+def test_proactive_limiter_blocks_the_6th_call_within_the_window():
+    """H (part 2). The 6th call within the same 60s window must wait for the
+    oldest call to age out -- it must never be allowed to exceed rpm_limit."""
+    clock = _FakeClock()
+    limiter = OCRRateLimiter(rpm_limit=5, enabled=True, window_seconds=60.0, clock=clock.time, sleep_fn=clock.sleep)
+    for _ in range(5):
+        limiter.acquire()
+    assert clock.now == 0.0
+
+    limiter.acquire()
+    assert clock.sleeps == [60.0]  # waited for the full window since no time had passed
+    assert clock.now == 60.0
+
+
+def test_proactive_limiter_disabled_never_waits():
+    clock = _FakeClock()
+    limiter = OCRRateLimiter(rpm_limit=1, enabled=False, clock=clock.time, sleep_fn=clock.sleep)
+    for _ in range(10):
+        limiter.acquire()
+    assert clock.sleeps == []
+
+
+def test_proactive_limiter_shared_across_concurrent_threads():
+    """I. Multiple concurrent worker threads sharing ONE limiter instance must
+    collectively respect the RPM budget -- not each get their own independent window.
+    Uses a small REAL window (well under a second) so this stays fast without
+    needing to fake time across real OS threads."""
+    import threading as _threading
+    import time as _time
+
+    limiter = OCRRateLimiter(rpm_limit=2, enabled=True, window_seconds=0.25)
+    call_times = []
+    call_times_lock = _threading.Lock()
+
+    def worker():
+        limiter.acquire()
+        with call_times_lock:
+            call_times.append(_time.monotonic())
+
+    threads = [_threading.Thread(target=worker) for _ in range(4)]
+    start = _time.monotonic()
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+    elapsed = _time.monotonic() - start
+
+    assert len(call_times) == 4
+    # 4 calls against an rpm_limit of 2 forces at least one real wait for the
+    # window to roll over -- proving the threads shared one window, not four
+    # independent ones (which would never have needed to wait at all).
+    assert elapsed >= 0.2
+
+
+def test_proactive_limiter_shared_regardless_of_worker_count_via_engine():
+    """J. OCR_MAX_WORKERS > 1 (simulated here via a real ThreadPoolExecutor calling
+    engine.ocr_page from multiple threads) must not create independent rate-limit
+    windows -- all worker threads share the ONE limiter instance passed to the
+    single shared engine, exactly like PDFOCRIngestor.ocr_pages_parallel does."""
+    import concurrent.futures
+    import time as _time
+
+    limiter = OCRRateLimiter(rpm_limit=2, enabled=True, window_seconds=0.25)
+    engine = QwenVisionOCREngine(api_key=FAKE_API_KEY, rate_limiter=limiter)
+
+    with patch.object(engine.client.chat.completions, "create", return_value=_make_success_response("ok")):
+        start = _time.monotonic()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(engine.ocr_page, FAKE_BASE64_IMAGE, page_num=p) for p in range(1, 5)]
+            results = [f.result(timeout=5) for f in futures]
+        elapsed = _time.monotonic() - start
+
+    assert results == ["ok", "ok", "ok", "ok"]
+    assert elapsed >= 0.2
+
+
+# --- Environment variable defaults/overrides ---------------------------------
+
+def test_ocr_rpm_limit_env_defaults_to_5(monkeypatch):
+    monkeypatch.delenv("OCR_RPM_LIMIT", raising=False)
+    assert _ocr_rpm_limit_from_env() == 5
+    assert DEFAULT_OCR_RPM_LIMIT == 5
+
+
+def test_ocr_rpm_limit_env_override(monkeypatch):
+    monkeypatch.setenv("OCR_RPM_LIMIT", "12")
+    assert _ocr_rpm_limit_from_env() == 12
+
+
+def test_ocr_rpm_limit_env_invalid_value_falls_back_to_default(monkeypatch):
+    monkeypatch.setenv("OCR_RPM_LIMIT", "not-a-number")
+    assert _ocr_rpm_limit_from_env() == 5
+
+
+def test_ocr_rate_limit_enabled_env_defaults_to_true(monkeypatch):
+    monkeypatch.delenv("OCR_RATE_LIMIT_ENABLED", raising=False)
+    assert _ocr_rate_limit_enabled_from_env() is True
+
+
+def test_ocr_rate_limit_enabled_env_can_be_disabled(monkeypatch):
+    monkeypatch.setenv("OCR_RATE_LIMIT_ENABLED", "false")
+    assert _ocr_rate_limit_enabled_from_env() is False
+
+
+def test_engine_uses_shared_limiter_configured_from_env_by_default(monkeypatch):
+    """Confirms a freshly-constructed engine, with no explicit rate_limiter=
+    override, picks up OCR_RATE_LIMIT_ENABLED/OCR_RPM_LIMIT via the shared
+    singleton -- without ever actually calling ocr_page (so no real waiting)."""
+    monkeypatch.setenv("OCR_RATE_LIMIT_ENABLED", "true")
+    monkeypatch.setenv("OCR_RPM_LIMIT", "7")
+    reset_shared_ocr_rate_limiter_for_tests()
+    try:
+        engine = QwenVisionOCREngine(api_key=FAKE_API_KEY)
+        assert engine.rate_limiter is get_shared_ocr_rate_limiter()
+        assert engine.rate_limiter.enabled is True
+        assert engine.rate_limiter.rpm_limit == 7
+    finally:
+        reset_shared_ocr_rate_limiter_for_tests()
+
+
+# --- L: existing successful-request behavior is unchanged --------------------
+
+def test_successful_ocr_request_behavior_unchanged_with_rate_limiting_active():
+    """L. A normal successful call still returns the OCR text unchanged, still
+    calls the API exactly once, with the (disabled-by-default-in-tests) rate
+    limiter integrated but not altering the golden path."""
+    engine = _rl_engine()
+    with patch.object(
+        engine.client.chat.completions, "create",
+        return_value=_make_success_response("normal OCR text"),
+    ) as mock_create:
+        result = engine.ocr_page(FAKE_BASE64_IMAGE, page_num=1)
+
+    assert result == "normal OCR text"
+    assert mock_create.call_count == 1
+
+
+def test_compute_rate_limit_wait_seconds_priority_and_fallback():
+    """Direct unit contract for the wait-time priority order and the fallback
+    exponential backoff when neither Retry-After nor a parsable message exists."""
+    err_with_header = _make_status_error(
+        _openai_pkg.RateLimitError, 429, "resets in 29s", headers={"Retry-After": "5"}
+    )
+    wait, source = _compute_rate_limit_wait_seconds(err_with_header, attempt=1)
+    assert (wait, source) == (6.0, "retry_after")
+
+    err_message_only = _make_status_error(_openai_pkg.RateLimitError, 429, "resets in 10s", headers={})
+    wait, source = _compute_rate_limit_wait_seconds(err_message_only, attempt=1)
+    assert (wait, source) == (11.0, "response_message")
+
+    err_no_hint = _make_status_error(_openai_pkg.RateLimitError, 429, "rate limited", headers={})
+    wait, source = _compute_rate_limit_wait_seconds(err_no_hint, attempt=1)
+    assert source == "fallback_backoff"
+    assert wait == pytest.approx(2.0)
+    wait2, _ = _compute_rate_limit_wait_seconds(err_no_hint, attempt=2)
+    assert wait2 == pytest.approx(4.0)
+    wait3, _ = _compute_rate_limit_wait_seconds(err_no_hint, attempt=3)
+    assert wait3 == pytest.approx(8.0)
 
 
 # ==============================================================================

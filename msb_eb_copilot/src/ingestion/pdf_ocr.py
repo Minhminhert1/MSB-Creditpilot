@@ -26,12 +26,15 @@ Tuân thủ nghiêm ngặt các nguyên tắc:
 
 import os
 import io
+import re
+import time
 import base64
 import logging
 import threading
+import collections
 import concurrent.futures
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from pydantic import BaseModel, Field
 
 import pypdf
@@ -199,6 +202,182 @@ class OCRDocumentResult(BaseModel):
 
 
 # ==============================================================================
+# 2b. GREENNODE 429 RATE-LIMIT HANDLING: proactive RPM pacing + reactive retry
+# ==============================================================================
+# Confirmed production root cause: the currently selected Vision model
+# z-ai/glm-5.3-flash-thirdparty enforces a hard 5 requests-per-minute cap per API
+# key on GreenNode MaaS. Two independent, complementary defenses:
+#   1. Proactive pacing (OCRRateLimiter): every OCR call -- across however many
+#      worker threads share one engine instance -- blocks briefly *before*
+#      sending if it would exceed OCR_RPM_LIMIT, so 429s become rare.
+#   2. Reactive retry (below, in QwenVisionOCREngine.ocr_page): if a 429 still
+#      happens (e.g. another process/job shares the same API key), retry the
+#      SAME page up to a fixed attempt cap, waiting exactly as long as the
+#      upstream response tells us to.
+DEFAULT_OCR_RPM_LIMIT = 5
+_RATE_LIMIT_WINDOW_SECONDS = 60.0
+_RATE_LIMIT_SAFETY_BUFFER_SECONDS = 1.0
+_RATE_LIMIT_MAX_ATTEMPTS = 4
+_RATE_LIMIT_FALLBACK_BASE_SECONDS = 2.0
+_RATE_LIMIT_FALLBACK_CAP_SECONDS = 30.0
+# Matches upstream phrasing such as "model rpm limit exceeded (5/5), resets in 2s"
+# or "...resets in 29s". Only ever applied to the exception's own message text --
+# never to headers/body/request.
+_RESETS_IN_SECONDS_PATTERN = re.compile(r"resets?\s+in\s+(\d+(?:\.\d+)?)\s*s", re.IGNORECASE)
+
+
+def _ocr_rate_limit_enabled_from_env() -> bool:
+    """OCR_RATE_LIMIT_ENABLED, default true. Only 'false'/'0'/'no'/'off' disable it."""
+    raw = os.getenv("OCR_RATE_LIMIT_ENABLED")
+    if raw is None or not str(raw).strip():
+        return True
+    return str(raw).strip().lower() not in ("false", "0", "no", "off")
+
+
+def _ocr_rpm_limit_from_env() -> int:
+    """OCR_RPM_LIMIT, default 5 (the confirmed limit for z-ai/glm-5.3-flash-thirdparty).
+    Any invalid/non-positive value safely falls back to the default."""
+    raw = os.getenv("OCR_RPM_LIMIT")
+    if raw is not None and str(raw).strip():
+        try:
+            val = int(str(raw).strip())
+            if val > 0:
+                return val
+        except ValueError:
+            pass
+    return DEFAULT_OCR_RPM_LIMIT
+
+
+class OCRRateLimiter:
+    """Proactive, thread-safe requests-per-minute (RPM) pacing limiter.
+
+    Any number of threads holding a reference to the SAME instance collectively
+    respect one RPM budget: `acquire()` maintains a sliding window of monotonic
+    call timestamps behind a `threading.Lock`, and blocks (sleeping OUTSIDE the
+    lock, so waiting threads never starve each other) until issuing another
+    request would keep the window at or under `rpm_limit`. This paces requests
+    BEFORE a 429 ever happens, and is correct regardless of how many worker
+    threads call it concurrently or how OCR_MAX_WORKERS is configured -- there is
+    exactly one shared window, not one per thread.
+    """
+
+    def __init__(
+        self,
+        rpm_limit: int,
+        enabled: bool = True,
+        window_seconds: float = _RATE_LIMIT_WINDOW_SECONDS,
+        clock=time.monotonic,
+        sleep_fn=time.sleep,
+    ):
+        self.rpm_limit = max(1, int(rpm_limit))
+        self.enabled = enabled
+        self._window_seconds = window_seconds
+        self._clock = clock
+        self._sleep = sleep_fn
+        self._lock = threading.Lock()
+        self._call_timestamps: "collections.deque[float]" = collections.deque()
+
+    def acquire(self) -> None:
+        if not self.enabled:
+            return
+        while True:
+            with self._lock:
+                now = self._clock()
+                while self._call_timestamps and (now - self._call_timestamps[0]) >= self._window_seconds:
+                    self._call_timestamps.popleft()
+                if len(self._call_timestamps) < self.rpm_limit:
+                    self._call_timestamps.append(now)
+                    return
+                wait_seconds = self._window_seconds - (now - self._call_timestamps[0])
+            if wait_seconds > 0:
+                self._sleep(wait_seconds)
+
+
+_shared_ocr_rate_limiter_lock = threading.Lock()
+_shared_ocr_rate_limiter: Optional[OCRRateLimiter] = None
+
+
+def get_shared_ocr_rate_limiter() -> OCRRateLimiter:
+    """Process-wide singleton limiter. Every QwenVisionOCREngine created without an
+    explicit `rate_limiter=` override shares this single instance, so concurrent
+    OCR worker threads -- for any OCR_MAX_WORKERS value, and even across separate
+    engine instances/documents processed concurrently in the same process --
+    collectively respect one OCR_RPM_LIMIT budget instead of pacing independently."""
+    global _shared_ocr_rate_limiter
+    with _shared_ocr_rate_limiter_lock:
+        if _shared_ocr_rate_limiter is None:
+            _shared_ocr_rate_limiter = OCRRateLimiter(
+                rpm_limit=_ocr_rpm_limit_from_env(),
+                enabled=_ocr_rate_limit_enabled_from_env(),
+            )
+        return _shared_ocr_rate_limiter
+
+
+def reset_shared_ocr_rate_limiter_for_tests() -> None:
+    """Test-only: forces the next get_shared_ocr_rate_limiter() call to rebuild
+    from current env vars. Never called from production code paths."""
+    global _shared_ocr_rate_limiter
+    with _shared_ocr_rate_limiter_lock:
+        _shared_ocr_rate_limiter = None
+
+
+def _parse_retry_after_seconds(exc: BaseException) -> Optional[float]:
+    """Reads ONLY the Retry-After response header value -- never any other header,
+    never the body, never the request."""
+    response = getattr(exc, "response", None)
+    if response is None:
+        return None
+    try:
+        header_val = response.headers.get("Retry-After")
+    except Exception:
+        return None
+    if not header_val:
+        return None
+    try:
+        return float(str(header_val).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_resets_in_seconds(message: str) -> Optional[float]:
+    """Parses a free-text upstream message such as 'resets in 2s' / 'resets in 29s'.
+    Only ever reads the exception's own message text -- never headers/body/request."""
+    if not message:
+        return None
+    match = _RESETS_IN_SECONDS_PATTERN.search(message)
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def _compute_rate_limit_wait_seconds(exc: BaseException, attempt: int) -> Tuple[float, str]:
+    """Determines how long to wait before retrying a 429, per required priority:
+    1. Retry-After response header (+ safety buffer)
+    2. 'resets in Ns' parsed from the error message (+ safety buffer)
+    3. Safe fallback exponential backoff (no upstream hint available)
+
+    Returns (wait_seconds, source) where source is one of
+    "retry_after", "response_message", "fallback_backoff" (used for logging only).
+    """
+    retry_after = _parse_retry_after_seconds(exc)
+    if retry_after is not None:
+        return retry_after + _RATE_LIMIT_SAFETY_BUFFER_SECONDS, "retry_after"
+
+    resets_in = _parse_resets_in_seconds(str(exc))
+    if resets_in is not None:
+        return resets_in + _RATE_LIMIT_SAFETY_BUFFER_SECONDS, "response_message"
+
+    fallback = min(
+        _RATE_LIMIT_FALLBACK_BASE_SECONDS * (2 ** (attempt - 1)),
+        _RATE_LIMIT_FALLBACK_CAP_SECONDS,
+    )
+    return fallback, "fallback_backoff"
+
+
+# ==============================================================================
 # 3. BASE OCR ENGINE & QWEN VISION ADAPTER
 # ==============================================================================
 class BaseOCREngine(ABC):
@@ -245,7 +424,9 @@ class QwenVisionOCREngine(BaseOCREngine):
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model: Optional[str] = None,
-        timeout: float = 60.0
+        timeout: float = 60.0,
+        rate_limiter: Optional[OCRRateLimiter] = None,
+        sleep_fn=None,
     ):
         resolved_key = (
             api_key
@@ -278,6 +459,12 @@ class QwenVisionOCREngine(BaseOCREngine):
             timeout=self.timeout
         )
 
+        # Proactive RPM pacing: shared across worker threads by default (see
+        # get_shared_ocr_rate_limiter). Tests/callers may inject an explicit
+        # limiter/sleep function to control timing deterministically.
+        self.rate_limiter = rate_limiter or get_shared_ocr_rate_limiter()
+        self._sleep = sleep_fn or time.sleep
+
     def _known_secrets(self) -> List[str]:
         """The actual resolved secret value(s) for this engine instance, used only
         to proactively redact them from diagnostic log messages (see
@@ -300,60 +487,82 @@ class QwenVisionOCREngine(BaseOCREngine):
             }
         ]
 
-        import time
-        start_time = time.perf_counter()
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.0,
-                max_tokens=2048,
-            )
-            latency_ms = (time.perf_counter() - start_time) * 1000.0
-            content = response.choices[0].message.content
+        attempt = 0
+        while True:
+            attempt += 1
+            # Proactive pacing happens on every attempt, including retries, so a
+            # retried call is itself still counted against the shared RPM budget.
+            self.rate_limiter.acquire()
 
-            in_tok = getattr(response.usage, "prompt_tokens", None) if hasattr(response, "usage") and response.usage else None
-            out_tok = getattr(response.usage, "completion_tokens", None) if hasattr(response, "usage") and response.usage else None
-            tot_tok = getattr(response.usage, "total_tokens", None) if hasattr(response, "usage") and response.usage else None
+            start_time = time.perf_counter()
             try:
-                from msb_eb_copilot.src.ai_client import AIAssistantClient
-                AIAssistantClient.record_telemetry(
-                    operation=f"ocr_page_{page_num}",
+                response = self.client.chat.completions.create(
                     model=self.model,
-                    latency_ms=latency_ms,
-                    success=True,
-                    input_tokens=in_tok,
-                    output_tokens=out_tok,
-                    total_tokens=tot_tok,
+                    messages=messages,
+                    temperature=0.0,
+                    max_tokens=2048,
                 )
-            except Exception:
-                pass
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+                content = response.choices[0].message.content
 
-            return content if content is not None else ""
-        except APITimeoutError as exc:
-            secrets = self._known_secrets()
-            _sanitize_exception_message_in_place(exc, secrets)
-            logger.exception(
-                "GreenNode OCR request timed out (fail-closed, no retry/behavior change): %s",
-                _safe_ocr_error_fields(exc, page_num, self.model, secrets_to_redact=secrets),
-            )
-            raise OCRTimeoutError(f"Thời gian chờ OCR trang {page_num} vượt quá {self.timeout}s: {str(exc)}") from exc
-        except (APIError, APIConnectionError) as exc:
-            secrets = self._known_secrets()
-            _sanitize_exception_message_in_place(exc, secrets)
-            logger.exception(
-                "GreenNode OCR API/connection error: %s",
-                _safe_ocr_error_fields(exc, page_num, self.model, secrets_to_redact=secrets),
-            )
-            raise OCRServiceError(f"Lỗi dịch vụ OCR khi xử lý trang {page_num}: {str(exc)}") from exc
-        except Exception as exc:
-            secrets = self._known_secrets()
-            _sanitize_exception_message_in_place(exc, secrets)
-            logger.exception(
-                "Unexpected error during GreenNode OCR call: %s",
-                _safe_ocr_error_fields(exc, page_num, self.model, secrets_to_redact=secrets),
-            )
-            raise OCRServiceError(f"Lỗi không xác định khi gọi OCR trang {page_num}: {str(exc)}") from exc
+                in_tok = getattr(response.usage, "prompt_tokens", None) if hasattr(response, "usage") and response.usage else None
+                out_tok = getattr(response.usage, "completion_tokens", None) if hasattr(response, "usage") and response.usage else None
+                tot_tok = getattr(response.usage, "total_tokens", None) if hasattr(response, "usage") and response.usage else None
+                try:
+                    from msb_eb_copilot.src.ai_client import AIAssistantClient
+                    AIAssistantClient.record_telemetry(
+                        operation=f"ocr_page_{page_num}",
+                        model=self.model,
+                        latency_ms=latency_ms,
+                        success=True,
+                        input_tokens=in_tok,
+                        output_tokens=out_tok,
+                        total_tokens=tot_tok,
+                    )
+                except Exception:
+                    pass
+
+                return content if content is not None else ""
+            except APITimeoutError as exc:
+                # Kept fully separate from rate-limit handling: never retried here.
+                secrets = self._known_secrets()
+                _sanitize_exception_message_in_place(exc, secrets)
+                logger.exception(
+                    "GreenNode OCR request timed out (fail-closed, no retry/behavior change): %s",
+                    _safe_ocr_error_fields(exc, page_num, self.model, secrets_to_redact=secrets),
+                )
+                raise OCRTimeoutError(f"Thời gian chờ OCR trang {page_num} vượt quá {self.timeout}s: {str(exc)}") from exc
+            except (APIError, APIConnectionError) as exc:
+                status_code = getattr(exc, "status_code", None)
+
+                # Only HTTP 429 is ever retried. 400/401/403/etc. fall straight
+                # through to the existing (unretried) error path below.
+                if status_code == 429 and attempt < _RATE_LIMIT_MAX_ATTEMPTS:
+                    wait_seconds, source = _compute_rate_limit_wait_seconds(exc, attempt)
+                    secrets = self._known_secrets()
+                    _sanitize_exception_message_in_place(exc, secrets)
+                    logger.warning(
+                        "OCR rate limited page=%s model=%s attempt=%s wait_seconds=%s source=%s",
+                        page_num, self.model, attempt, round(wait_seconds, 2), source,
+                    )
+                    self._sleep(wait_seconds)
+                    continue
+
+                secrets = self._known_secrets()
+                _sanitize_exception_message_in_place(exc, secrets)
+                logger.exception(
+                    "GreenNode OCR API/connection error: %s",
+                    _safe_ocr_error_fields(exc, page_num, self.model, secrets_to_redact=secrets),
+                )
+                raise OCRServiceError(f"Lỗi dịch vụ OCR khi xử lý trang {page_num}: {str(exc)}") from exc
+            except Exception as exc:
+                secrets = self._known_secrets()
+                _sanitize_exception_message_in_place(exc, secrets)
+                logger.exception(
+                    "Unexpected error during GreenNode OCR call: %s",
+                    _safe_ocr_error_fields(exc, page_num, self.model, secrets_to_redact=secrets),
+                )
+                raise OCRServiceError(f"Lỗi không xác định khi gọi OCR trang {page_num}: {str(exc)}") from exc
 
 
 DEFAULT_OCR_MAX_WORKERS = 4
