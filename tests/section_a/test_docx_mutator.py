@@ -18,7 +18,7 @@ class SectionADocxMutatorTests(unittest.TestCase):
             os.path.join(os.path.dirname(__file__), "..", "..")
         )
         self.orig_template = os.path.join(
-            self.repo_root, "MB07 Tờ trình đề xuất cấp tín dụng (ĐVKD) - Tho.docx"
+            self.repo_root, "MB07 Tờ trình đề xuất cấp tín dụng (ĐVKD) - bản tham khảo.docx"
         )
         self.tmp_dir = tempfile.mkdtemp()
         self.working_copy = os.path.join(self.tmp_dir, "test_mb07.docx")

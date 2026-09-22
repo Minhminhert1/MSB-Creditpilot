@@ -71,7 +71,7 @@ class DocumentIngestionResult(BaseModel):
     failed_pages: List[OCRFailedPageInfo] = Field(
         default_factory=list,
         description="Các trang OCR được dung thứ là không đọc được sau khi hết mọi lần thử lại "
-                    "-- CHỈ khác rỗng khi caller truyền max_failed_pages (hiện tại: chỉ luồng OCR tài chính)."
+                    "-- CHỈ khác rỗng khi caller truyền max_failed_pages (hiện tại: luồng OCR tài chính và doanh nghiệp)."
     )
 
 
@@ -101,11 +101,11 @@ class DocumentIngestionRouter:
                 OCR fallback -- gọi lại (page_num, completed_count, total_pages) sau mỗi
                 trang OCR hoàn tất. Không tác động tới đường đi digital-only (không OCR).
             max_failed_pages: Tùy chọn (mặc định None -- giữ NGUYÊN hành vi hiện tại, bất
-                kỳ trang lỗi nào cũng làm hỏng toàn bộ). Khi được truyền (hiện tại: CHỈ
-                luồng OCR tài chính), bật chế độ dung thứ trang lỗi -- xem
+                kỳ trang lỗi nào cũng làm hỏng toàn bộ). Khi được truyền (hiện tại: luồng
+                OCR tài chính và doanh nghiệp), bật chế độ dung thứ trang lỗi -- xem
                 PDFOCRIngestor.ocr_pages_parallel/extract_document để biết chi tiết.
                 Không tác động tới đường đi digital-only, và không thay đổi hành vi
-                legal/business/CIC (các luồng đó không truyền tham số này).
+                legal/CIC (các luồng đó không truyền tham số này).
 
         Returns:
             DocumentIngestionResult chứa tagged_text và metadata nguồn gốc.

@@ -50,6 +50,28 @@ from msb_eb_copilot.src.narrative.store import (
     NARRATIVE_DRAFT_STORE,
 )
 
+# This entire file exercises /api/narrative/generate for case_id="PSD" with the
+# LIVE pipeline classes (GLMInsightDiscoveryAgent/PythonInsightVerifier/
+# GLMNarrativeWriterAgent/DeterministicNarrativeValidator) explicitly mocked --
+# it predates, and is independent of, the demo-precomputed-snapshot fast path
+# (see msb_eb_copilot/src/demo_narrative_cache.py). Since PSD is a real
+# preloaded-demo-flagged case and a real on-disk snapshot now exists for it,
+# calling the real endpoint without disabling snapshot lookup here would
+# transparently short-circuit to DEMO_PRECOMPUTED and never exercise (or call)
+# the mocks these tests assert against. Cleared for the whole module so every
+# test in this file reliably exercises the live path being tested.
+_demo_snapshot_patcher = patch.dict(
+    "msb_eb_copilot.src.demo_narrative_cache.DEMO_NARRATIVE_SNAPSHOTS", {}, clear=True
+)
+
+
+def setUpModule():
+    _demo_snapshot_patcher.start()
+
+
+def tearDownModule():
+    _demo_snapshot_patcher.stop()
+
 
 class DummyMockServer:
     """Mock HTTP Request Handler helper for testing CopilotHTTPHandler routes."""

@@ -234,7 +234,7 @@ class OCRDocumentResult(BaseModel):
     failed_pages: List[OCRFailedPageInfo] = Field(
         default_factory=list,
         description="Các trang được dung thứ (tolerated) là không đọc được sau khi đã hết mọi lần thử lại "
-                    "-- CHỈ khác rỗng khi caller truyền max_failed_pages (hiện tại: chỉ luồng OCR tài chính)."
+                    "-- CHỈ khác rỗng khi caller truyền max_failed_pages (hiện tại: luồng OCR tài chính và doanh nghiệp)."
     )
 
 
@@ -904,9 +904,10 @@ class PDFOCRIngestor:
                 ném lỗi, lỗi đó được nuốt (không làm hỏng luồng OCR chính) vì đây chỉ là
                 kênh báo cáo phụ trợ.
             max_failed_pages: MẶC ĐỊNH None -- giữ NGUYÊN hành vi hiện tại: BẤT KỲ ngoại lệ
-                nào (kể cả OCRNoTextError) đều hủy toàn bộ ngay lập tức. Chỉ luồng OCR tài
-                chính (financial) mới truyền một số nguyên >= 0 để bật chế độ "dung thứ trang
-                lỗi": CHỈ OCRNoTextError (hết retry nội dung rỗng) được dung thứ -- trang đó
+                nào (kể cả OCRNoTextError) đều hủy toàn bộ ngay lập tức. Các luồng OCR tài
+                chính (financial) và doanh nghiệp (business) truyền một số nguyên >= 0 để bật
+                chế độ "dung thứ trang lỗi": CHỈ OCRNoTextError (hết retry nội dung rỗng) được
+                dung thứ -- trang đó
                 được ghi nhận vào failed_pages_out và quá trình tiếp tục với các trang còn
                 lại; các ngoại lệ khác (OCRServiceError, OCRTimeoutError, OCRRenderError,
                 OCRPageCountError,...) vẫn hủy toàn bộ ngay lập tức bất kể tham số này -- đó
@@ -1054,8 +1055,8 @@ class PDFOCRIngestor:
 
         max_failed_pages: xem docstring của ocr_pages_parallel. Mặc định None giữ
         nguyên hành vi hiện tại (bất kỳ trang lỗi nào cũng hủy toàn bộ tài liệu).
-        Khi được truyền (hiện tại: chỉ luồng OCR tài chính), các trang được dung
-        thứ sẽ xuất hiện trong tagged_text dưới dạng [PAGE X]\\nOCR_UNREADABLE_PAGE_MARKER
+        Khi được truyền (hiện tại: luồng OCR tài chính và doanh nghiệp), các trang
+        được dung thứ sẽ xuất hiện trong tagged_text dưới dạng [PAGE X]\\nOCR_UNREADABLE_PAGE_MARKER
         (KHÔNG bịa nội dung) và trong OCRDocumentResult.failed_pages.
         """
         # 1. Preflight xác định số trang dự kiến bằng pypdf

@@ -1,0 +1,92 @@
+{
+  "case_id": "PSD",
+  "execution_provenance": {
+    "ai_calls": 0,
+    "builder": "scripts/build_demo_narrative_snapshots.py",
+    "generated_at": "2026-09-22T03:54:39.469456+00:00",
+    "greennode_calls": 0,
+    "method": "deterministic_local",
+    "network_calls": 0
+  },
+  "model_id": "DETERMINISTIC_DEMO_SNAPSHOT",
+  "narrative_blocks": [
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "LEGAL_NAME",
+        "LEGAL_SHORT_NAME",
+        "LEGAL_TAX_CODE",
+        "BIZ_MODEL",
+        "PARENT_GROUP",
+        "LEGAL_CHARTER_CAPITAL",
+        "LEGAL_ADDRESS"
+      ],
+      "insights_used": [],
+      "section": "BUSINESS",
+      "target_binding": "business_overview",
+      "text": "Tên doanh nghiệp: CÔNG TY CỔ PHẦN PHÂN PHỐI DEMO. Tên viết tắt: DEMO DISTRIBUTION JSC. Mã số thuế: 0100000000. Mô hình kinh doanh: THUONG_MAI. Công ty mẹ / Tập đoàn: TẬP ĐOÀN DEMO. Vốn điều lệ: 518,3 tỷ đồng. Địa chỉ trụ sở: P.207, Tòa nhà PetroVietnam, Số 1-5 Lê Duẩn, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh.",
+      "title": "Tổng quan doanh nghiệp"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "LEGAL_REP_NAME",
+        "BIZ_MANAGEMENT"
+      ],
+      "insights_used": [],
+      "section": "BUSINESS",
+      "target_binding": "management_summary",
+      "text": "Người đại diện pháp luật: Đại diện Demo. Quy mô ban điều hành: 4 thành viên.",
+      "title": "Ban điều hành & Người đại diện pháp luật"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "FIN_REV_2025",
+        "FIN_NP_2025",
+        "FIN_EQ_2025",
+        "FIN_STD_2025",
+        "RATIO_CURRENT_RATIO_2025",
+        "RATIO_ROE_2025",
+        "RATIO_REVENUE_GROWTH_2025"
+      ],
+      "insights_used": [],
+      "section": "FINANCIAL",
+      "target_binding": "pnl_analysis",
+      "text": "Doanh thu thuần năm 2025: 7819,4 tỷ đồng. Lợi nhuận sau thuế năm 2025: 134,2 tỷ đồng. Vốn chủ sở hữu năm 2025: 729,3 tỷ đồng. Nợ vay ngắn hạn năm 2025: 2572,0 tỷ đồng. Hệ số thanh toán hiện hành (Current Ratio) năm 2025: 1,8 lần. Tỷ suất sinh lời vốn chủ sở hữu (ROE) năm 2025: 18,4%. Tăng trưởng doanh thu năm 2025: 37,1%.",
+      "title": "Tổng hợp tài chính năm 2025"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "CIC_HISTORY_STATUS",
+        "CIC_IS_OVERDUE_12M",
+        "CIC_MSB_OUTSTANDING",
+        "CIC_OTHER_BANKS_DEBT",
+        "REQ_TOTAL_LIMIT",
+        "REQ_LOAN_LIMIT",
+        "REQ_GUARANTEE_LIMIT"
+      ],
+      "insights_used": [],
+      "section": "CIC",
+      "target_binding": "cic_summary",
+      "text": "Phân loại nợ CIC: 100% Nhóm 1 (Đủ tiêu chuẩn) trong 24 tháng gần nhất tại MSB và các TCTD.. Nợ quá hạn trong 12 tháng gần nhất: Không phát sinh nợ quá hạn. Dư nợ tại MSB: 500,0 tỷ đồng. Dư nợ tại các TCTD khác: 0,0 tỷ đồng. Tổng hạn mức đề xuất: 700,0 tỷ đồng. Hạn mức cho vay: 250,0 tỷ đồng. Hạn mức bảo lãnh: 30,0 tỷ đồng.",
+      "title": "Tổng hợp quan hệ tín dụng & Đề xuất cấp tín dụng"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "RATIO_DEBT_TO_EQUITY_2025",
+        "RATIO_QUICK_RATIO_2025",
+        "RATIO_CASH_RATIO_2025"
+      ],
+      "insights_used": [],
+      "section": "FINANCIAL",
+      "target_binding": "risk_observation_summary",
+      "text": "Đòn bẩy tài chính (Debt/Equity) năm 2025: 5,4 lần. Khả năng thanh toán nhanh (Quick Ratio) năm 2025: 1,4 lần. Khả năng thanh toán bằng tiền (Cash Ratio) năm 2025: 0,1 lần.",
+      "title": "Quan sát rủi ro tài chính năm 2025"
+    }
+  ],
+  "source_manifest_hash": "8b9971714f3bd6ada4246dfcf2b424d05878d5519e4fcfe09373e897f4165a07",
+  "verified_insights": []
+}

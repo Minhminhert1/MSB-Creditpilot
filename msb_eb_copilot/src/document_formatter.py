@@ -132,6 +132,27 @@ class DocumentFormatter:
             DocumentFormatter.strip_highlights_and_shading(doc)
 
     @staticmethod
+    def strip_author_metadata(doc: docx.Document) -> None:
+        """Clears document-level author/last-modified-by metadata (docProps/core.xml
+        'creator' and 'lastModifiedBy' fields) on every generated proposal.
+
+        Privacy rationale: the authoritative MB07 template (and any prior save of a
+        generated proposal) can carry a bank employee's real name in this metadata
+        -- inherited automatically by python-docx into every subsequent save unless
+        explicitly cleared. This is metadata-only: it never touches document body,
+        tables, headers/footers, comments, or any visible content, so it cannot
+        affect template fidelity or customer-side documentary evidence.
+        """
+        try:
+            doc.core_properties.author = ""
+        except Exception:
+            pass
+        try:
+            doc.core_properties.last_modified_by = ""
+        except Exception:
+            pass
+
+    @staticmethod
     def polish(doc_path: str, output_path: Optional[str] = None, keep_highlights: bool = False) -> str:
         """Perform fidelity-safe polish on the proposal document.
 
@@ -140,6 +161,8 @@ class DocumentFormatter:
         - Preserves all drawings, images, logo relationships, headers, footers, and section geometries.
         - Strips yellow highlights and shading if keep_highlights=False.
         - Cleans explicitly known placeholder dot lines strictly at the run level.
+        - Clears document-level author/last-modified-by metadata (privacy: never carries
+          forward a bank employee's name from the template into generated output).
         - Does NOT perform global style normalization or rebuild paragraphs.
         """
         if output_path is None:
@@ -154,6 +177,9 @@ class DocumentFormatter:
         if not keep_highlights:
             DocumentFormatter.strip_highlights_and_shading(doc)
 
-        # 3. Save without structural alteration
+        # 3. Safe author/last-modified-by metadata scrub (docProps/core.xml only)
+        DocumentFormatter.strip_author_metadata(doc)
+
+        # 4. Save without structural alteration
         doc.save(output_path)
         return output_path

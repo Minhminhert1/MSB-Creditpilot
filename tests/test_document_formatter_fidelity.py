@@ -38,7 +38,7 @@ class TestDocumentFormatterFidelity(unittest.TestCase):
         )
         if not os.path.exists(cls.template_path):
             cls.template_path = os.path.join(
-                base_dir, "MB07 Tờ trình đề xuất cấp tín dụng (ĐVKD) - Tho.docx"
+                base_dir, "MB07 Tờ trình đề xuất cấp tín dụng (ĐVKD) - bản tham khảo.docx"
             )
         assert os.path.exists(cls.template_path), f"MB07 template not found at {cls.template_path}"
 

@@ -75,6 +75,7 @@ from msb_eb_copilot.src.narrative import (
     CreditNarrativePackage, NarrativeDraftManager, NarrativeTargetBinding,
     NARRATIVE_DRAFT_STORE
 )
+from msb_eb_copilot.src.demo_narrative_cache import get_valid_demo_snapshot
 from msb_eb_copilot.src.proposal_assembler import CreditProposalAssembler
 from msb_eb_copilot.src.document_formatter import DocumentFormatter
 from msb_eb_copilot.src.document_qa_agent import run_document_qa_gate, DocumentQAFailedError
@@ -222,6 +223,7 @@ from msb_eb_copilot.src.extraction.business_extraction import (
     BusinessGroundingAuditor,
     BusinessIdentityReconciler,
     BusinessModelClassifier,
+    get_business_ocr_max_failed_pages,
 )
 from msb_eb_copilot.src.mapping.business_mapper import BusinessDocumentMapper
 
@@ -233,6 +235,7 @@ PORT = int(os.getenv("PORT", 8080))
 CASES_DB = {
     "PSD": {
         "id": "PSD",
+        "_is_preloaded_demo": True,
         "name": "PSD - CTCP Phân phối Demo",
         "customer": {
             "name": "CÔNG TY CỔ PHẦN PHÂN PHỐI DEMO",
@@ -254,11 +257,11 @@ CASES_DB = {
         },
         "rm_metadata": {
             "unit_name": "LC2MN",
-            "rm_name": "RM DEMO (CBBH) / RM SUPPORT (RM)",
+            "rm_name": "[RM tự điền] / [Cán bộ QHKH tự điền]",
             "rm_phone": "0900000000",
-            "support_name": "SUPPORT DEMO",
+            "support_name": "[Cán bộ hỗ trợ QHKH tự điền]",
             "support_phone": "0900000001",
-            "manager_name": "MANAGER DEMO",
+            "manager_name": "[Người có thẩm quyền tự điền]",
             "manager_phone": "0900000002",
             "proposal_no": "01.2026 - PSD",
             "proposal_date": "12/01/2026",
@@ -338,6 +341,7 @@ CASES_DB = {
     },
     "GAS_SOUTH": {
         "id": "GAS_SOUTH",
+        "_is_preloaded_demo": True,
         "name": "GAS SOUTH - CTCP Kinh doanh Khí Miền Nam",
         "customer": {
             "name": "CÔNG TY CỔ PHẦN KINH DOANH KHÍ MIỀN NAM",
@@ -359,11 +363,11 @@ CASES_DB = {
         },
         "rm_metadata": {
             "unit_name": "LC1MN",
-            "rm_name": "Lê Văn Hùng (RM) / Trần Thị Mai (CBBH)",
+            "rm_name": "[RM tự điền] / [Cán bộ QHKH tự điền]",
             "rm_phone": "0912 345 678",
-            "support_name": "Vũ Đình Trọng",
+            "support_name": "[Cán bộ hỗ trợ QHKH tự điền]",
             "support_phone": "0988 776 655",
-            "manager_name": "Phạm Quốc Tuấn",
+            "manager_name": "[Người có thẩm quyền tự điền]",
             "manager_phone": "0909 112 233",
             "proposal_no": "04.2026 - GAS_SOUTH",
             "proposal_date": "15/01/2026",
@@ -442,6 +446,7 @@ CASES_DB = {
     },
     "PHYTOPHARMA": {
         "id": "PHYTOPHARMA",
+        "_is_preloaded_demo": True,
         "name": "PHYTOPHARMA - CTCP Dược liệu Trung ương 2",
         "customer": {
             "name": "CÔNG TY CỔ PHẦN DƯỢC LIỆU TRUNG ƯƠNG 2",
@@ -463,11 +468,11 @@ CASES_DB = {
         },
         "rm_metadata": {
             "unit_name": "EB-HCM",
-            "rm_name": "Nguyễn Thị Ngân (RM - EB-HCM QHKH)",
+            "rm_name": "[RM tự điền] / [Cán bộ QHKH tự điền]",
             "rm_phone": "0908 123 456",
-            "support_name": "Phạm Văn Nam",
+            "support_name": "[Cán bộ hỗ trợ QHKH tự điền]",
             "support_phone": "0912 345 678",
-            "manager_name": "Trần Tuấn Anh",
+            "manager_name": "[Người có thẩm quyền tự điền]",
             "manager_phone": "0903 888 999",
             "proposal_no": "05.2026 - PHYTOPHARMA",
             "proposal_date": "29/05/2026",
@@ -1880,6 +1885,7 @@ HTML_PAGE = """<!DOCTYPE html>
           <div class="flex items-center space-x-2">
             <span class="font-bold" style="color:var(--color-text);">Mô hình AI:</span>
             <span id="narrative-model-label" class="chip chip-info font-mono"></span>
+            <span id="narrative-demo-badge" class="hidden chip chip-neutral" title="Nhận định đã được chuẩn bị trước cho hồ sơ demo, số liệu canonical chưa thay đổi kể từ lúc chuẩn bị.">Preloaded Demo</span>
           </div>
           <div class="flex items-center space-x-3">
             <span id="narrative-manifest-hash" class="font-mono">Hash: -</span>
@@ -2508,6 +2514,51 @@ HTML_PAGE = """<!DOCTYPE html>
       CURRENT_REVIEW_DOCTYPE = null;
     }
 
+    // Deterministic Python calculation contract (compute_canonical_ratios):
+    // - RATIO_METRICS are plain multiples (e.g. current_ratio = 1.42 means 1.42x).
+    // - PERCENT_METRICS are ALREADY expressed in percent units (e.g. ros = 12.34
+    //   means 12.34%, NOT 0.1234) -- the Python layer multiplies by 100 once.
+    //   The frontend must never multiply by 100 again.
+    // - Missing/undeterminable values are Python None -> JSON null, never "" or a
+    //   fabricated 0. Zero is a genuine, distinct value from missing.
+    const RATIO_METRICS = new Set([
+      'current_ratio', 'quick_ratio', 'cash_ratio', 'debt_to_equity', 'total_debt_to_equity'
+    ]);
+    const PERCENT_METRICS = new Set([
+      'ros', 'roe', 'gross_profit_margin_pct', 'revenue_growth'
+    ]);
+    const FINANCIAL_METRIC_LABELS = {
+      current_ratio: 'Current Ratio',
+      quick_ratio: 'Quick Ratio',
+      cash_ratio: 'Cash Ratio',
+      debt_to_equity: 'Debt / Equity',
+      total_debt_to_equity: 'Total Debt / Equity',
+      ros: 'ROS',
+      roe: 'ROE',
+      gross_profit_margin_pct: 'Gross Profit Margin',
+      revenue_growth: 'Revenue Growth',
+    };
+    const FINANCIAL_NUMBER_FORMATTER = new Intl.NumberFormat('vi-VN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
+    // Distinguishes genuinely missing/undeterminable values (null, undefined,
+    // "", NaN, Infinity) from a real numeric value (including a real zero), and
+    // is the ONLY place ratio/percentage presentation formatting happens --
+    // never coerce a raw value (or worse, a whole per-year array) directly into
+    // a template literal elsewhere.
+    function formatFinancialMetric(metricName, value) {
+      if (value === null || value === undefined || value === '') return '—';
+      const num = typeof value === 'number' ? value : Number(value);
+      if (!Number.isFinite(num)) return '—';
+
+      const formatted = FINANCIAL_NUMBER_FORMATTER.format(num);
+      if (PERCENT_METRICS.has(metricName)) return `${formatted}%`;
+      if (RATIO_METRICS.has(metricName)) return `${formatted}x`;
+      return formatted;
+    }
+
     function renderReviewBody(docType, data) {
       const body = document.getElementById('modal-review-body');
       if (!body) return;
@@ -2575,9 +2626,9 @@ HTML_PAGE = """<!DOCTYPE html>
             resolutionControl = `
               <div class="mt-1 space-y-1">
                 <div class="text-[10px]" style="color:var(--color-warning);">${f.conflict_note || ''}</div>
-                <select id="res-legal-${k}" class="w-full text-[11px] p-1 rounded font-medium" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
-                  <option value="USE_EXTRACTED">✓ Lấy số liệu mới bóc tách</option>
-                  <option value="KEEP_EXISTING">✕ Giữ số liệu hồ sơ hiện tại</option>
+                <select class="legal-resolution-select w-full text-[11px] p-1 rounded font-medium" data-canonical-path="${f.canonical_path}" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
+                  <option value="use_extracted">✓ Lấy số liệu mới bóc tách</option>
+                  <option value="keep_existing">✕ Giữ số liệu hồ sơ hiện tại</option>
                 </select>
               </div>
             `;
@@ -2670,9 +2721,9 @@ HTML_PAGE = """<!DOCTYPE html>
             resControl = `
               <div class="mt-1">
                 <div class="text-[10px]" style="color:var(--color-warning);">${item.conflict_note || ''}</div>
-                <select id="res-fin-${item.canonical_field}-${item.year}" class="w-full text-[10px] p-1 rounded font-medium" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
-                  <option value="USE_EXTRACTED">✓ Dùng số liệu BCTC</option>
-                  <option value="KEEP_EXISTING">✕ Giữ số liệu cũ</option>
+                <select class="financial-resolution-select w-full text-[10px] p-1 rounded font-medium" data-canonical-path="section_d.${item.canonical_field}[${item.year}]" style="background:var(--color-warning-bg); border:1px solid var(--color-warning-border);">
+                  <option value="use_extracted">✓ Dùng số liệu BCTC</option>
+                  <option value="keep_existing">✕ Giữ số liệu cũ</option>
                 </select>
               </div>
             `;
@@ -2701,6 +2752,11 @@ HTML_PAGE = """<!DOCTYPE html>
         `;
 
         if (Object.keys(ratios).length > 0) {
+          // calculated_ratios values are per-year arrays (parallel to
+          // ratio_periods/section_d.years), NOT scalars -- each metric card
+          // must render one formatted value per year, never the raw array.
+          const ratioYears = Array.isArray(data.ratio_periods) ? data.ratio_periods : periods;
+
           html += `
             <div class="p-3 bg-emerald-50/60 border border-emerald-200 rounded-lg space-y-2">
               <div class="font-bold text-emerald-900 text-xs flex items-center space-x-1.5">
@@ -2708,12 +2764,25 @@ HTML_PAGE = """<!DOCTYPE html>
                 <span>Chỉ Số Tài Chính Tính Toán Tự Động (Python Verification Engine - 100% Deterministic):</span>
               </div>
               <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                ${Object.entries(ratios).map(([k, v]) => `
-                  <div class="bg-white p-2 rounded border border-emerald-100 shadow-sm">
-                    <div class="text-[10px] text-slate-500">${k}</div>
-                    <div class="font-bold text-slate-800 text-sm mt-0.5">${typeof v === 'number' ? v.toFixed(2) : v}</div>
-                  </div>
-                `).join('')}
+                ${Object.entries(ratios).map(([metricKey, valuesByYear]) => {
+                  const label = FINANCIAL_METRIC_LABELS[metricKey] || metricKey;
+                  const valuesArr = Array.isArray(valuesByYear) ? valuesByYear : [valuesByYear];
+                  const rows = valuesArr.map((v, i) => {
+                    const yearLabel = ratioYears[i] != null ? ratioYears[i] : `#${i + 1}`;
+                    return `
+                      <div class="flex items-center justify-between">
+                        <span class="text-[10px] text-slate-400">${yearLabel}</span>
+                        <span class="font-bold text-slate-800">${formatFinancialMetric(metricKey, v)}</span>
+                      </div>
+                    `;
+                  }).join('');
+                  return `
+                    <div class="bg-white p-2 rounded border border-emerald-100 shadow-sm">
+                      <div class="text-[10px] text-slate-500 font-semibold mb-1">${label}</div>
+                      ${rows}
+                    </div>
+                  `;
+                }).join('')}
               </div>
             </div>
           `;
@@ -2752,6 +2821,17 @@ HTML_PAGE = """<!DOCTYPE html>
             </label>
           </div>
         `;
+
+        const bizOcrWarnings = data.ocr_warnings || null;
+        if (bizOcrWarnings && Array.isArray(bizOcrWarnings.failed_pages) && bizOcrWarnings.failed_pages.length > 0) {
+          const pageList = bizOcrWarnings.failed_pages.join(', ');
+          const pageWord = bizOcrWarnings.failed_pages.length > 1 ? 'các trang' : 'trang';
+          html += `
+            <div id="ocr-degraded-warning-panel" class="p-2.5 bg-amber-50 border border-amber-300 rounded-lg text-xs space-y-1">
+              <div class="font-bold text-amber-800">⚠ Một số trang không thể đọc được bằng OCR (${pageWord} ${pageList}). Hệ thống chỉ sử dụng bằng chứng từ các trang đọc được.</div>
+            </div>
+          `;
+        }
 
         html += `
           <div class="overflow-x-auto">
@@ -2890,29 +2970,54 @@ HTML_PAGE = """<!DOCTYPE html>
         case_id: cid
       };
 
-      if (docType === 'legal') {
+      // Machine values a conflict <select> is allowed to submit. Display labels
+      // (Vietnamese text) are a separate concern from these values -- see the
+      // <option value="..."> markup above, which must always use one of these.
+      const VALID_RESOLUTION_VALUES = ['use_extracted', 'keep_existing'];
+      const invalidResolutionEls = [];
+
+      // Resolution binding is deliberately NOT keyed off a DOM id built from the
+      // canonical path (e.g. "res-fin-current_assets-2025"). The canonical path
+      // itself (e.g. "section_d.current_assets[2025]") is instead carried
+      // verbatim in a data-canonical-path attribute and read back via
+      // querySelectorAll + .dataset -- this avoids any dependency on how a
+      // canonical path happens to be encoded into an id/CSS-selector-safe
+      // string (brackets, dots, collisions across rows/years, stale re-renders).
+      function collectResolutions(selectorClass) {
         const resolutions = {};
-        if (info.previewData && info.previewData.fields) {
-          for (const [k, f] of Object.entries(info.previewData.fields)) {
-            const sel = document.getElementById('res-legal-' + k);
-            if (sel) resolutions[f.canonical_path] = sel.value;
-          }
-        }
+        document.querySelectorAll(`.${selectorClass}`).forEach(sel => {
+          const key = sel.dataset.canonicalPath;
+          if (!key) return;
+          if (!VALID_RESOLUTION_VALUES.includes(sel.value)) invalidResolutionEls.push(sel);
+          resolutions[key] = sel.value;
+        });
+        return resolutions;
+      }
+
+      if (docType === 'legal') {
+        const resolutions = collectResolutions('legal-resolution-select');
         if (Object.keys(resolutions).length > 0) payload.resolutions = resolutions;
       } else if (docType === 'financial') {
-        const resolutions = {};
-        if (info.previewData && Array.isArray(info.previewData.review_table)) {
-          info.previewData.review_table.forEach(item => {
-            const sel = document.getElementById(`res-fin-${item.canonical_field}-${item.year}`);
-            if (sel) resolutions[`section_d.${item.canonical_field}[${item.year}]`] = sel.value;
-          });
-        }
+        const resolutions = collectResolutions('financial-resolution-select');
         if (Object.keys(resolutions).length > 0) payload.resolutions = resolutions;
       } else if (docType === 'business') {
         const bmEl = document.getElementById('bm-override');
         if (bmEl) payload.business_model_override = bmEl.value;
         const ackEl = document.getElementById('check-business-ack');
         payload.identity_acknowledged = ackEl ? ackEl.checked : true;
+      }
+
+      if (invalidResolutionEls.length > 0) {
+        invalidResolutionEls.forEach(sel => {
+          sel.style.outline = '2px solid #dc2626';
+          sel.style.outlineOffset = '1px';
+        });
+        alert('⚠ Vui lòng chọn phương án xử lý hợp lệ cho tất cả các dòng xung đột trước khi xác nhận.');
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<span>✓ Xác Nhận Vào Hồ Sơ (Commit)</span>';
+        }
+        return;
       }
 
       try {
@@ -3836,6 +3941,7 @@ HTML_PAGE = """<!DOCTYPE html>
       manifestHash: null,
       model: null,
       generationSource: null,
+      executionMode: null, // 'DEMO_PRECOMPUTED' | 'LIVE_AI' | null
       narrativeReady: false,
       readinessReason: null,
       blocks: [],
@@ -3872,6 +3978,7 @@ HTML_PAGE = """<!DOCTYPE html>
           NARRATIVE_STATE.readinessReason = data.readiness_reason || null;
           NARRATIVE_STATE.model = data.model || null;
           NARRATIVE_STATE.generationSource = data.generation_source || null;
+          NARRATIVE_STATE.executionMode = data.execution_mode || null;
 
           if (data.has_draft && data.blocks && data.blocks.length > 0) {
             NARRATIVE_STATE.generationId = data.generation_id;
@@ -3939,6 +4046,7 @@ HTML_PAGE = """<!DOCTYPE html>
           NARRATIVE_STATE.manifestHash = data.manifest_hash;
           NARRATIVE_STATE.model = data.model || null;
           NARRATIVE_STATE.generationSource = data.generation_source || null;
+          NARRATIVE_STATE.executionMode = data.execution_mode || null;
           NARRATIVE_STATE.blocks = data.blocks || [];
           NARRATIVE_STATE.verifiedInsights = data.verified_insights || [];
           NARRATIVE_STATE.error = null;
@@ -4205,6 +4313,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const hashEl = document.getElementById('narrative-manifest-hash');
             const insCountEl = document.getElementById('narrative-insights-count');
             const blkCountEl = document.getElementById('narrative-blocks-count');
+            const demoBadgeEl = document.getElementById('narrative-demo-badge');
             if (modelEl) {
               const modelName = NARRATIVE_STATE.model;
               if (modelName) {
@@ -4218,6 +4327,7 @@ HTML_PAGE = """<!DOCTYPE html>
             if (hashEl) hashEl.innerText = `Manifest Hash: ${NARRATIVE_STATE.manifestHash ? NARRATIVE_STATE.manifestHash.slice(0, 16) + '...' : '-'}`;
             if (insCountEl) insCountEl.innerText = `${NARRATIVE_STATE.verifiedInsights.length} Verified Insights`;
             if (blkCountEl) blkCountEl.innerText = `${NARRATIVE_STATE.blocks.length} Narrative Blocks`;
+            if (demoBadgeEl) demoBadgeEl.classList.toggle('hidden', NARRATIVE_STATE.executionMode !== 'DEMO_PRECOMPUTED');
           }
           break;
 
@@ -4243,6 +4353,7 @@ HTML_PAGE = """<!DOCTYPE html>
             const hashEl = document.getElementById('narrative-manifest-hash');
             const insCountEl = document.getElementById('narrative-insights-count');
             const blkCountEl = document.getElementById('narrative-blocks-count');
+            const demoBadgeEl = document.getElementById('narrative-demo-badge');
             if (modelEl) {
               const modelName = NARRATIVE_STATE.model;
               if (modelName) {
@@ -4256,6 +4367,7 @@ HTML_PAGE = """<!DOCTYPE html>
             if (hashEl) hashEl.innerText = `Manifest Hash: ${NARRATIVE_STATE.manifestHash ? NARRATIVE_STATE.manifestHash.slice(0, 16) + '...' : '-'}`;
             if (insCountEl) insCountEl.innerText = `${NARRATIVE_STATE.verifiedInsights.length} Verified Insights`;
             if (blkCountEl) blkCountEl.innerText = `${NARRATIVE_STATE.blocks.length} Narrative Blocks`;
+            if (demoBadgeEl) demoBadgeEl.classList.toggle('hidden', NARRATIVE_STATE.executionMode !== 'DEMO_PRECOMPUTED');
           }
           break;
       }
@@ -4420,7 +4532,15 @@ HTML_PAGE = """<!DOCTYPE html>
         statusNote = 'Tài liệu đạt chuẩn định dạng MB07.';
       } else if (qa.status === 'PASS_WITH_WARNING') {
         statusChip = '<span class="chip chip-warning">PASS — CÓ CẢNH BÁO</span>';
-        statusNote = 'Xuất bản đã được cho phép. Phát hiện khác biệt font chữ (không chặn xuất bản theo chính sách) — vui lòng xem lại trước khi hoàn tất.';
+        // Two independent, non-blocking reasons can produce this status: a
+        // font-only visual finding, and/or the AI reviewer not answering for
+        // one or more pages even after retry (visual_qa_status). Both may be
+        // visible in the issues list below regardless of which note is shown.
+        if (qa.visual_qa_status === 'UNAVAILABLE') {
+          statusNote = 'Kiểm định cấu trúc MB07 đã đạt. AI Visual QA chưa hoàn tất đầy đủ; vui lòng kiểm tra nhanh bản xuất.';
+        } else {
+          statusNote = 'Xuất bản đã được cho phép. Phát hiện khác biệt font chữ (không chặn xuất bản theo chính sách) — vui lòng xem lại trước khi hoàn tất.';
+        }
       } else if (qa.status === 'VISUAL_QA_UNAVAILABLE') {
         statusChip = '<span class="chip chip-warning">VISUAL QA UNAVAILABLE</span>';
         statusNote = 'Kiểm định cấu trúc đạt yêu cầu. Không thể xác minh định dạng hiển thị trong môi trường này.';
@@ -4569,6 +4689,42 @@ LEGAL_PREVIEW_STORE: dict[str, LegalPreviewRecord] = {}
 MAX_PREVIEW_UPLOAD_SIZE = 15 * 1024 * 1024  # 15 MB
 
 
+def _resolve_and_validate_preview_case_id(case_id: Optional[str]) -> tuple[Optional[str], Optional[tuple[dict[str, Any], int]]]:
+    """Resolves the target case_id for a document PREVIEW request (legal,
+    financial, business, CIC), shared by all four so the same rule can never
+    diverge between doc types.
+
+    Zero Silent Fallback contract:
+    - case_id omitted entirely (None/empty) -> defaults to ACTIVE_CASE_ID, same
+      as before (this is an intentional, explicit default, not a fallback).
+    - case_id EXPLICITLY provided but not an existing CASES_DB key -> the
+      request MUST fail immediately with a clear error. It must NEVER silently
+      substitute ACTIVE_CASE_ID (a previous bug in business/CIC preview) and
+      must NEVER let a preview be staged against a fabricated empty case
+      skeleton (a previous bug in financial preview) -- both allowed a preview
+      to be created under a case_id that does not actually exist, which is
+      exactly the class of bug that produces a later, confusing
+      "preview belongs to case X, does not match requested case Y" mismatch
+      at confirmation time instead of a clear failure at upload time.
+    - This function NEVER normalizes/rewrites one string into another (e.g. an
+      alias into a canonical id): an unrecognized case_id is a hard failure,
+      not something to guess about.
+
+    Returns (target_cid, None) on success, or (None, (error_payload, status))
+    on failure -- the caller must return the error tuple immediately.
+    """
+    if case_id and case_id not in CASES_DB:
+        return None, (
+            {
+                "status": "error",
+                "error_type": "CaseNotFoundError",
+                "message": f"Không tìm thấy hồ sơ khách hàng hợp lệ '{case_id}'.",
+            },
+            404,
+        )
+    return (case_id or ACTIVE_CASE_ID), None
+
+
 def process_legal_pdf_preview(raw_bytes: bytes, filename: str, case_id: str | None = None) -> tuple[dict[str, Any], int]:
     """Execute Ingestion -> Extraction -> Mapping pipeline for one legal PDF.
 
@@ -4581,6 +4737,10 @@ def process_legal_pdf_preview(raw_bytes: bytes, filename: str, case_id: str | No
     """
     temp_path = None
     try:
+        target_cid, cid_err = _resolve_and_validate_preview_case_id(case_id)
+        if cid_err:
+            return cid_err
+
         # Create server-generated temporary file
         with tempfile.NamedTemporaryFile(prefix="legal_preview_", suffix=".pdf", delete=False) as tmp:
             tmp.write(raw_bytes)
@@ -4659,7 +4819,6 @@ def process_legal_pdf_preview(raw_bytes: bytes, filename: str, case_id: str | No
             }
 
         preview_id = str(uuid.uuid4())
-        target_cid = case_id or ACTIVE_CASE_ID
         record = LegalPreviewRecord(
             preview_id=preview_id,
             case_id=target_cid,
@@ -5164,6 +5323,10 @@ def process_financial_pdf_preview(
     """
     temp_path = None
     try:
+        target_cid, cid_err = _resolve_and_validate_preview_case_id(case_id)
+        if cid_err:
+            return cid_err
+
         with tempfile.NamedTemporaryFile(prefix="fin_preview_", suffix=".pdf", delete=False) as tmp:
             tmp.write(raw_bytes)
             temp_path = tmp.name
@@ -5198,7 +5361,9 @@ def process_financial_pdf_preview(
                     audit_warnings.extend(field_errs)
 
         # 4. Deterministic Canonical Mapping against existing case data (isolated snapshot)
-        target_cid = case_id or ACTIVE_CASE_ID
+        # target_cid was already validated (above) to be either omitted (defaults to
+        # ACTIVE_CASE_ID) or an existing CASES_DB key -- .get(..., {}) here is just a
+        # defensive default, never a way to silently proceed with an unknown case.
         existing_case = deepcopy(CASES_DB.get(target_cid, {}))
         source_meta = MappingSourceMetadata(
             source_document=filename,
@@ -5292,6 +5457,11 @@ def process_financial_pdf_preview(
             "routing": routing,
             "review_table": review_table,
             "periods": [p.period.strip() for p in extraction_res.periods if p.period],
+            # Authoritative year labels for calculated_ratios: each ratio list is
+            # index-aligned to section_d.years (the merged/sorted timeline used by
+            # compute_canonical_ratios), which is NOT guaranteed to be in the same
+            # order as "periods" above (raw GreenNode extraction order).
+            "ratio_periods": preview_section_d.get("years", []),
             "calculated_ratios": calculated_ratios,
             "audit_warnings": audit_warnings[:10],
             "ocr_warnings": ocr_warnings,
@@ -5431,6 +5601,14 @@ def validate_and_confirm_financial_preview(
             for c in map_result.conflicts:
                 res = resolutions.get(c.canonical_path)
                 if res not in ("use_extracted", "keep_existing", "extracted", "existing"):
+                    # Safe diagnostic only: canonical_path is a fixed, non-secret
+                    # field identifier (e.g. "section_d.current_assets[2025]"),
+                    # and the submitted value is truncated + type-tagged so this
+                    # can never leak document contents, evidence, or secrets.
+                    logger.warning(
+                        "Financial conflict resolution rejected: canonical_path=%r submitted_value_type=%s submitted_value=%r",
+                        c.canonical_path, type(res).__name__, repr(res)[:80],
+                    )
                     return {
                         "status": "error",
                         "error_type": "InvalidInputError",
@@ -5513,6 +5691,10 @@ def process_cic_pdf_preview(raw_bytes: bytes, filename: str, case_id: str | None
     """Execute Ingestion -> CIC Extraction -> Grounding Audit -> Identity Reconcile -> Deterministic Mapping."""
     temp_path = None
     try:
+        target_cid, cid_err = _resolve_and_validate_preview_case_id(case_id)
+        if cid_err:
+            return cid_err
+
         with tempfile.NamedTemporaryFile(prefix="cic_preview_", suffix=".pdf", delete=False) as tmp:
             tmp.write(raw_bytes)
             temp_path = tmp.name
@@ -5528,9 +5710,10 @@ def process_cic_pdf_preview(raw_bytes: bytes, filename: str, case_id: str | None
         pages_text, max_p = CICGroundingAuditor.extract_pages(ingestion_res.tagged_text)
 
         # 4. Identity Reconciliation
-        target_cid = case_id or ACTIVE_CASE_ID
-        if target_cid not in CASES_DB:
-            target_cid = ACTIVE_CASE_ID
+        # target_cid was already validated above -- an unknown case_id fails
+        # immediately rather than silently substituting ACTIVE_CASE_ID here
+        # (that used to let a preview requested for one case silently attach
+        # to whatever case happened to be active instead).
         target_case = CASES_DB[target_cid]
 
         ext_tc = extraction_res.tax_code.value_raw if extraction_res.tax_code else None
@@ -5770,12 +5953,19 @@ BUSINESS_PREVIEW_STORE: dict[str, BusinessPreviewRecord] = {}
 def process_business_pdf_preview(raw_bytes: bytes, filename: str, case_id: str | None = None) -> tuple[dict[str, Any], int]:
     temp_path = None
     try:
+        target_cid, cid_err = _resolve_and_validate_preview_case_id(case_id)
+        if cid_err:
+            return cid_err
+
         with tempfile.NamedTemporaryFile(prefix="biz_preview_", suffix=".pdf", delete=False) as tmp:
             tmp.write(raw_bytes)
             temp_path = tmp.name
 
         # 1. Router Ingestion
-        ingestion_res = DocumentIngestionRouter.ingest_document(temp_path)
+        ingestion_res = DocumentIngestionRouter.ingest_document(
+            temp_path,
+            max_failed_pages=get_business_ocr_max_failed_pages(),
+        )
 
         # 2. Semantic Extraction via GreenNode
         extractor = BusinessDocumentExtractor()
@@ -5785,9 +5975,10 @@ def process_business_pdf_preview(raw_bytes: bytes, filename: str, case_id: str |
         pages_text, max_p = BusinessGroundingAuditor.extract_pages(ingestion_res.tagged_text)
 
         # 4. Identity Reconciliation
-        target_cid = case_id or ACTIVE_CASE_ID
-        if target_cid not in CASES_DB:
-            target_cid = ACTIVE_CASE_ID
+        # target_cid was already validated above -- an unknown case_id fails
+        # immediately rather than silently substituting ACTIVE_CASE_ID here
+        # (that used to let a preview requested for one case silently attach
+        # to whatever case happened to be active instead).
         target_case = CASES_DB[target_cid]
 
         ext_tc = extraction_res.tax_code.value_raw if extraction_res.tax_code else None
@@ -5957,12 +6148,21 @@ def process_business_pdf_preview(raw_bytes: bytes, filename: str, case_id: str |
         )
         BUSINESS_PREVIEW_STORE[preview_id] = record
 
+        # Page-level degraded OCR handling metadata (safe: page numbers + fixed
+        # reason codes only -- see OCRFailedPageInfo). Empty when no pages failed.
+        failed_page_nums = sorted(fp.page for fp in ingestion_res.failed_pages)
+        ocr_warnings = {
+            "failed_pages": failed_page_nums,
+            "failed_page_count": len(failed_page_nums),
+        }
+
         return {
             "status": "success",
             "preview_id": preview_id,
             "case_id": target_cid,
             "filename": filename,
             "routing": routing_meta,
+            "ocr_warnings": ocr_warnings,
             "identity_reconciliation": {
                 "status": id_status,
                 "message": id_msg,
@@ -6377,6 +6577,14 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
             if rec and getattr(rec, "model_id", None):
                 model_name = rec.model_id
 
+            # execution_mode is recorded on rec.telemetry at generation time
+            # (see /api/narrative/generate). Older records created before this
+            # field existed default to LIVE_AI (they can only have come from
+            # the live pipeline, since the demo fast path didn't exist yet).
+            execution_mode = None
+            if rec:
+                execution_mode = (rec.telemetry or {}).get("execution_mode", "LIVE_AI")
+
             self._send_json({
                 "status": "success",
                 "case_id": cid,
@@ -6386,7 +6594,8 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 "generation_id": rec.generation_id if rec else None,
                 "draft_status": rec.status.value if rec else None,
                 "model": model_name,
-                "generation_source": "live" if rec else None,
+                "generation_source": ("demo_precomputed" if execution_mode == "DEMO_PRECOMPUTED" else "live") if rec else None,
+                "execution_mode": execution_mode,
                 "telemetry": rec.telemetry if rec and getattr(rec, "telemetry", None) else None,
                 "blocks_count": len(rec.blocks) if rec else 0,
                 "accepted_count": len(accepted),
@@ -6738,13 +6947,24 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 }, status_code=400)
                 return
 
-            target_cid = body_json.get("case_id") or ACTIVE_CASE_ID
+            # Validated immediately (fail fast) rather than only inside the
+            # background job: an unknown case_id should never queue an OCR run
+            # that is doomed to end up owned by the wrong case (or fail late,
+            # after the user already waited through the whole OCR job).
+            target_cid, cid_err = _resolve_and_validate_preview_case_id(body_json.get("case_id"))
+            if cid_err:
+                error_payload, error_status = cid_err
+                self._send_json(error_payload, status_code=error_status)
+                return
 
             # Async background job: never make the browser/gateway wait for the
             # full OCR run (a large scanned BCTC against a 5 RPM Vision quota can
             # take far longer than any HTTP request lifetime). The job keeps
             # running to completion on its own thread regardless of whether the
-            # client that created it stays connected or polls again.
+            # client that created it stays connected or polls again. The exact
+            # validated target_cid above is threaded through unchanged -- the
+            # background job never recomputes/re-derives case_id from anything
+            # (least of all from extracted document identity).
             job_id = FINANCIAL_JOB_MANAGER.create_job(case_id=target_cid)
             threading.Thread(
                 target=_run_financial_preview_job,
@@ -7210,9 +7430,56 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 }, status_code=400)
                 return
             try:
-                # 1. Package confirmed canonical facts
+                # 1. Package confirmed canonical facts. ALWAYS done fresh, live,
+                # locally (never skipped): this is what makes the demo fast-path
+                # hash check below trustworthy -- it is computed from the exact
+                # canonical case_data present right now, not from any cached value.
                 packager = FactPackager()
                 manifest = packager.package_from_case_data(case_data, case_id=cid)
+
+                # DEMO FAST PATH (hackathon only): a preloaded demo case whose
+                # canonical facts have NOT changed since its snapshot was built
+                # reuses that already-verified narrative instead of re-running
+                # the two GLM-5.2 calls (Insight Discovery + Narrative Writer).
+                # Falls through to the unchanged live pipeline below for every
+                # other case, and for a demo case whose facts changed (hash
+                # mismatch) -- see msb_eb_copilot/src/demo_narrative_cache.py.
+                demo_snapshot = get_valid_demo_snapshot(cid, case_data, manifest.manifest_hash)
+                if demo_snapshot is not None:
+                    validator = DeterministicNarrativeValidator(manifest, demo_snapshot.verified_insights)
+                    validation_res = validator.validate_blocks(demo_snapshot.narrative_blocks)
+
+                    pkg = CreditNarrativePackage(
+                        case_id=cid,
+                        fact_manifest_hash=manifest.manifest_hash,
+                        narrative_blocks=demo_snapshot.narrative_blocks
+                    )
+                    rec = NarrativeDraftManager.create_draft_record(
+                        case_id=cid,
+                        manifest=manifest,
+                        insights=demo_snapshot.verified_insights,
+                        package=pkg,
+                        model_id=demo_snapshot.model_id
+                    )
+                    rec.telemetry = {"execution_mode": "DEMO_PRECOMPUTED"}
+
+                    self._send_json({
+                        "status": "success",
+                        "case_id": cid,
+                        "generation_id": rec.generation_id,
+                        "manifest_hash": manifest.manifest_hash,
+                        "model": rec.model_id,
+                        "generation_source": "demo_precomputed",
+                        "execution_mode": "DEMO_PRECOMPUTED",
+                        "telemetry": rec.telemetry,
+                        "verified_insights_count": len(demo_snapshot.verified_insights),
+                        "blocks_count": len(demo_snapshot.narrative_blocks),
+                        "is_valid": validation_res.is_valid,
+                        "validation_errors": list(validation_res.errors),
+                        "blocks": [b.model_dump() for b in demo_snapshot.narrative_blocks],
+                        "verified_insights": [i.model_dump() for i in demo_snapshot.verified_insights]
+                    })
+                    return
 
                 # 2. GLM-5.2 Insight Discovery
                 discovery_agent = GLMInsightDiscoveryAgent()
@@ -7248,6 +7515,7 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                 combined_telemetry = {
                     "discovery": discovery_telemetry if isinstance(discovery_telemetry, dict) else {},
                     "writer": writer_telemetry if isinstance(writer_telemetry, dict) else {},
+                    "execution_mode": "LIVE_AI",
                 }
                 rec.telemetry = combined_telemetry
 
@@ -7258,6 +7526,7 @@ class CopilotHTTPHandler(BaseHTTPRequestHandler):
                     "manifest_hash": manifest.manifest_hash,
                     "model": rec.model_id,
                     "generation_source": "live",
+                    "execution_mode": "LIVE_AI",
                     "telemetry": combined_telemetry,
                     "verified_insights_count": len(verified),
                     "blocks_count": len(blocks),

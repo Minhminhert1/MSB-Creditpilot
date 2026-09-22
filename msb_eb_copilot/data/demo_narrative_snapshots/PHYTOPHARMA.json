@@ -1,0 +1,92 @@
+{
+  "case_id": "PHYTOPHARMA",
+  "execution_provenance": {
+    "ai_calls": 0,
+    "builder": "scripts/build_demo_narrative_snapshots.py",
+    "generated_at": "2026-09-22T03:54:39.486772+00:00",
+    "greennode_calls": 0,
+    "method": "deterministic_local",
+    "network_calls": 0
+  },
+  "model_id": "DETERMINISTIC_DEMO_SNAPSHOT",
+  "narrative_blocks": [
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "LEGAL_NAME",
+        "LEGAL_SHORT_NAME",
+        "LEGAL_TAX_CODE",
+        "BIZ_MODEL",
+        "PARENT_GROUP",
+        "LEGAL_CHARTER_CAPITAL",
+        "LEGAL_ADDRESS"
+      ],
+      "insights_used": [],
+      "section": "BUSINESS",
+      "target_binding": "business_overview",
+      "text": "Tên doanh nghiệp: CÔNG TY CỔ PHẦN DƯỢC LIỆU TRUNG ƯƠNG 2. Tên viết tắt: PHYTOPHARMA VN. Mã số thuế: 0302597576. Mô hình kinh doanh: THUONG_MAI. Công ty mẹ / Tập đoàn: Không thuộc tập đoàn. Vốn điều lệ: 381,9 tỷ đồng. Địa chỉ trụ sở: 24 Nguyễn Thị Nghĩa, Phường Bến Thành, Quận 1, Thành phố Hồ Chí Minh, Việt Nam.",
+      "title": "Tổng quan doanh nghiệp"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "LEGAL_REP_NAME",
+        "BIZ_MANAGEMENT"
+      ],
+      "insights_used": [],
+      "section": "BUSINESS",
+      "target_binding": "management_summary",
+      "text": "Người đại diện pháp luật: Lê Minh Phú. Quy mô ban điều hành: 4 thành viên.",
+      "title": "Ban điều hành & Người đại diện pháp luật"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "FIN_REV_2025",
+        "FIN_NP_2025",
+        "FIN_EQ_2025",
+        "FIN_STD_2025",
+        "RATIO_CURRENT_RATIO_2025",
+        "RATIO_ROE_2025",
+        "RATIO_REVENUE_GROWTH_2025"
+      ],
+      "insights_used": [],
+      "section": "FINANCIAL",
+      "target_binding": "pnl_analysis",
+      "text": "Doanh thu thuần năm 2025: 43423,1 tỷ đồng. Lợi nhuận sau thuế năm 2025: 78,5 tỷ đồng. Vốn chủ sở hữu năm 2025: 2350,0 tỷ đồng. Nợ vay ngắn hạn năm 2025: 11200,0 tỷ đồng. Hệ số thanh toán hiện hành (Current Ratio) năm 2025: 1,3 lần. Tỷ suất sinh lời vốn chủ sở hữu (ROE) năm 2025: 3,3%. Tăng trưởng doanh thu năm 2025: 4,3%.",
+      "title": "Tổng hợp tài chính năm 2025"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "CIC_HISTORY_STATUS",
+        "CIC_IS_OVERDUE_12M",
+        "CIC_MSB_OUTSTANDING",
+        "CIC_OTHER_BANKS_DEBT",
+        "REQ_TOTAL_LIMIT",
+        "REQ_LOAN_LIMIT",
+        "REQ_GUARANTEE_LIMIT"
+      ],
+      "insights_used": [],
+      "section": "CIC",
+      "target_binding": "cic_summary",
+      "text": "Phân loại nợ CIC: 100% Nhóm 1 (Đủ tiêu chuẩn) trong toàn bộ lịch sử quan hệ tín dụng tại MSB và các TCTD.. Nợ quá hạn trong 12 tháng gần nhất: Không phát sinh nợ quá hạn. Dư nợ tại MSB: 684,9 tỷ đồng. Dư nợ tại các TCTD khác: 0,0 tỷ đồng. Tổng hạn mức đề xuất: 2000,0 tỷ đồng. Hạn mức cho vay: 1500,0 tỷ đồng. Hạn mức bảo lãnh: 500,0 tỷ đồng.",
+      "title": "Tổng hợp quan hệ tín dụng & Đề xuất cấp tín dụng"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "RATIO_DEBT_TO_EQUITY_2025",
+        "RATIO_QUICK_RATIO_2025",
+        "RATIO_CASH_RATIO_2025"
+      ],
+      "insights_used": [],
+      "section": "FINANCIAL",
+      "target_binding": "risk_observation_summary",
+      "text": "Đòn bẩy tài chính (Debt/Equity) năm 2025: 5,7 lần. Khả năng thanh toán nhanh (Quick Ratio) năm 2025: 0,9 lần. Khả năng thanh toán bằng tiền (Cash Ratio) năm 2025: 0,1 lần.",
+      "title": "Quan sát rủi ro tài chính năm 2025"
+    }
+  ],
+  "source_manifest_hash": "5c12b678f061cb7b767cad7f57a84cc88b5510c84fada7b923ab233cba05f9f1",
+  "verified_insights": []
+}

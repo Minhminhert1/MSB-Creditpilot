@@ -102,16 +102,16 @@ class TestCICPreviewAndConfirm(unittest.TestCase):
         )
         mock_extract.return_value = self.mock_extraction
 
-        res_prev, _ = process_cic_pdf_preview(b"%PDF-1.4 dummy", "cic_test.pdf", case_id="psd")
+        res_prev, _ = process_cic_pdf_preview(b"%PDF-1.4 dummy", "cic_test.pdf", case_id="PSD")
         pid = res_prev["preview_id"]
 
         # First confirm -> Success 200
-        res1, code1 = confirm_cic_preview(pid, case_id="psd")
+        res1, code1 = confirm_cic_preview(pid, case_id="PSD")
         self.assertEqual(code1, 200)
         self.assertEqual(res1["status"], "success")
 
         # Second confirm with same preview_id -> 409 Conflict
-        res2, code2 = confirm_cic_preview(pid, case_id="psd")
+        res2, code2 = confirm_cic_preview(pid, case_id="PSD")
         self.assertEqual(code2, 409)
         self.assertEqual(res2["error_type"], "PreviewAlreadyConsumedError")
 

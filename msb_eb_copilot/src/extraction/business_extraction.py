@@ -15,13 +15,15 @@ Strict Boundaries:
 
 from __future__ import annotations
 import json
+import os
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from msb_eb_copilot.src.ai_client import AIAssistantClient
+from msb_eb_copilot.src.ingestion.pdf_ocr import OCR_UNREADABLE_PAGE_MARKER
 
 
 # ==============================================================================
@@ -658,7 +660,20 @@ BẮT BUỘC TUÂN THỦ CÁC QUY TẮC NGHIỆP VỤ SAU:
    - `market_share_claim`: Trích xuất nguyên văn tuyên bố về thị phần của doanh nghiệp nếu có (vd: "Chiếm 25% thị phần phân phối...").
    - `competitive_advantages_claim`: Trích xuất nguyên văn tuyên bố về lợi thế cạnh tranh của doanh nghiệp nếu có.
 
-4. ĐỊNH DẠNG ĐẦU RA:
+4. TRANG OCR KHÔNG ĐỌC ĐƯỢC (ĐÁNH DẤU {OCR_UNREADABLE_MARKER}):
+   - Một số trang có thể được đánh dấu nội dung đúng bằng chuỗi tất định
+     "{OCR_UNREADABLE_MARKER}" thay vì văn bản thật -- điều này có nghĩa là hệ thống OCR
+     KHÔNG đọc được trang đó sau khi đã thử lại nhiều lần (không phải trang trắng, không
+     phải lỗi của bạn).
+   - Một trang có đánh dấu "{OCR_UNREADABLE_MARKER}" HOÀN TOÀN KHÔNG chứa bằng chứng
+     (evidence) sử dụng được. TUYỆT ĐỐI KHÔNG được:
+     * Suy đoán, ước lượng, hay "điền vào chỗ trống" bất kỳ thông tin nào cho trang đó.
+     * Sao chép/kế thừa evidence từ trang khác sang cho trang đó.
+     * Giả định trang đó là trang trắng hoặc không quan trọng.
+     * Trích dẫn số trang đó (page) làm bằng chứng cho bất kỳ trường hay thực thể nào.
+   - Quy tắc "NO EVIDENCE -> NO FACT" ở mục 1 áp dụng NGHIÊM NGẶT cho các trang này.
+
+5. ĐỊNH DẠNG ĐẦU RA:
    - Trả về DUY NHẤT một khối JSON hợp lệ tuân thủ schema dưới đây.
    - KHÔNG bọc thêm lời giải thích hay markdown thừa ngoài ```json ... ```.
 
@@ -759,6 +774,56 @@ Schema mẫu:
 }
 ```
 """
+
+# Substitutes the OCR_UNREADABLE marker's single source of truth
+# (pdf_ocr.OCR_UNREADABLE_PAGE_MARKER) into the prompt via a plain placeholder
+# token/str.replace() rather than str.format(), since the prompt's JSON example
+# already contains many literal '{'/'}' characters that would otherwise need
+# escaping.
+BUSINESS_EXTRACTION_SYSTEM_PROMPT = BUSINESS_EXTRACTION_SYSTEM_PROMPT.replace(
+    "{OCR_UNREADABLE_MARKER}", OCR_UNREADABLE_PAGE_MARKER
+)
+
+
+# Deterministic page-level degraded-handling threshold for BUSINESS PDF OCR only
+# (legal/CIC ingestion never reads this -- they keep the pre-existing
+# "any OCR failure aborts the whole document" behavior unconditionally).
+DEFAULT_BUSINESS_OCR_MAX_FAILED_PAGES = 2
+MIN_BUSINESS_OCR_MAX_FAILED_PAGES = 0
+
+
+def get_business_ocr_max_failed_pages(configured: Optional[Union[int, str]] = None) -> int:
+    """Xác định ngưỡng tối đa số trang OCR được phép dung thứ (tolerate) là không đọc
+    được (sau khi đã hết mọi lần thử lại nội dung rỗng) trước khi toàn bộ quá trình
+    nhập liệu hồ sơ doanh nghiệp bị coi là thất bại.
+
+    Quy tắc (giống hệt get_financial_ocr_max_failed_pages):
+    - Nếu truyền configured: dùng giá trị đó sau khi kiểm tra.
+    - Nếu không: đọc biến môi trường BUSINESS_OCR_MAX_FAILED_PAGES.
+    - Nếu không có biến MT hoặc rỗng: mặc định DEFAULT_BUSINESS_OCR_MAX_FAILED_PAGES (2).
+    - Nếu giá trị không parse được thành số nguyên, hoặc < 0: an toàn trả về mặc định 2.
+    - Giá trị >= 0 hợp lệ: trả về nguyên giá trị đó (0 nghĩa là KHÔNG dung thứ bất kỳ
+      trang lỗi nào -- tương đương thất bại ngay khi có 1 trang không đọc được).
+    """
+    raw_val = configured
+    if raw_val is None:
+        raw_env = os.getenv("BUSINESS_OCR_MAX_FAILED_PAGES")
+        if raw_env is not None and str(raw_env).strip():
+            try:
+                raw_val = int(str(raw_env).strip())
+            except ValueError:
+                return DEFAULT_BUSINESS_OCR_MAX_FAILED_PAGES
+        else:
+            return DEFAULT_BUSINESS_OCR_MAX_FAILED_PAGES
+
+    try:
+        val = int(raw_val)
+    except (ValueError, TypeError):
+        return DEFAULT_BUSINESS_OCR_MAX_FAILED_PAGES
+
+    if val < MIN_BUSINESS_OCR_MAX_FAILED_PAGES:
+        return DEFAULT_BUSINESS_OCR_MAX_FAILED_PAGES
+    return val
 
 
 class BusinessDocumentExtractor:

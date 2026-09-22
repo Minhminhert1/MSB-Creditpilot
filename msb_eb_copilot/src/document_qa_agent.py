@@ -22,8 +22,20 @@ Absolute rules:
    clipped text, blank areas, etc.).
 3. No silent fallback: if the visual renderer is unavailable, the result status
    is the explicit `VISUAL_QA_UNAVAILABLE` state, never a silent PASS.
-4. Fail-closed: any GreenNode API exception or malformed/non-JSON response is
-   treated as a visual QA FAILURE, never a PASS.
+4. Fail-closed for genuine reviewer OUTPUT: a valid, well-formed GreenNode
+   response that reports a real blocking visual defect (logo, header/footer,
+   table_layout, spacing_alignment) is a visual QA FAILURE, never a PASS.
+5. Reviewer UNAVAILABILITY is not evidence the document is bad: an empty
+   response, a timeout, a transient 429/5xx (after bounded retry), or a
+   malformed/non-JSON response (after bounded retry) means the external AI
+   reviewer failed to answer -- NOT that the rendered page is defective. This
+   is the explicit, non-silent `REVIEWER_UNAVAILABLE` condition
+   (visual_qa_status="UNAVAILABLE"), which downgrades the overall result to
+   PASS_WITH_WARNING (export allowed, warning visible) rather than FAIL,
+   provided all deterministic checks passed. A genuine deterministic failure,
+   or a genuine well-formed blocking visual defect, still FAILs and blocks
+   export exactly as before -- this policy only changes what happens when the
+   reviewer itself could not produce a usable answer.
 """
 
 from __future__ import annotations
@@ -45,6 +57,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 import docx
 from docx.oxml.ns import qn
 from lxml import etree
+from openai import APITimeoutError
 
 from .template_verification.structure_fingerprint import (
     DynamicTableRule,
@@ -90,23 +103,46 @@ DEFAULT_RENDER_DPI = int(os.getenv("DOCUMENT_QA_RENDER_DPI", "150") or "150")
 # retry backoff), to stay comfortably under rate limits on multi-page documents.
 DEFAULT_PAGE_DELAY_SECONDS = float(os.getenv("DOCUMENT_QA_PAGE_DELAY_SECONDS", "2.0") or "2.0")
 
-# Retry policy for retryable GreenNode API errors (HTTP 429/500/502/503/504) ONLY.
-# Non-retryable errors (4xx other than 429) and malformed JSON responses are never retried
-# and fail closed immediately.
+# Retry policy for retryable GreenNode API errors (HTTP 429/500/502/503/504) and
+# timeouts, WITHIN one page-compare attempt. Non-retryable errors (4xx other than
+# 429) fail closed immediately -- they are genuine config/auth problems, not
+# "reviewer momentarily unavailable".
 MAX_VISUAL_QA_ATTEMPTS = 4
 RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 # Approximate exponential backoff between attempts 1->2, 2->3, 3->4.
 _RETRY_BACKOFF_SCHEDULE_SECONDS: Tuple[float, ...] = (2.0, 5.0, 10.0)
 _RETRY_JITTER_MAX_SECONDS = 1.0
 
+# SEPARATE, independent retry axis (mirrors OCR_MAX_CONTENT_ATTEMPTS in
+# pdf_ocr.py): retries the WHOLE page-compare call (itself internally allowed
+# its own up to MAX_VISUAL_QA_ATTEMPTS against 429/5xx/timeout) up to this many
+# TOTAL times when the reviewer failed to produce a usable structured result
+# (empty content, timeout, malformed/schema-invalid response, or exhausted
+# transient-HTTP retry) -- i.e. one initial attempt + one retry. Deterministic
+# QA has already passed by this point, and an exhausted reviewer failure only
+# ever downgrades to PASS_WITH_WARNING (never FAIL), so a single extra retry
+# is enough; kept low to minimize live-demo latency and GreenNode rate-limit
+# exposure.
+VISUAL_QA_CONTENT_MAX_ATTEMPTS = 2
+
 STATUS_PASS = "PASS"
 STATUS_FAIL = "FAIL"
 STATUS_UNKNOWN = "UNKNOWN"
 STATUS_VISUAL_QA_UNAVAILABLE = "VISUAL_QA_UNAVAILABLE"
-# Deterministic QA all PASS, and the only visual-QA failure is font_consistency: export
-# is allowed (non-blocking), but the finding is still surfaced so it is never silently
-# discarded. See _WARNING_ONLY_VISUAL_CATEGORIES below for the export-policy rationale.
+# Deterministic QA all PASS, and the only visual-QA issue is font_consistency
+# and/or the AI reviewer being unavailable after bounded retry: export is
+# allowed (non-blocking), but the finding is still surfaced so it is never
+# silently discarded. See _WARNING_ONLY_VISUAL_CATEGORIES below for the
+# font_consistency export-policy rationale.
 STATUS_PASS_WITH_WARNING = "PASS_WITH_WARNING"
+
+# visual_qa_status values (top-level qa_result field, separate from the per-page
+# visual_checks dict): whether the GreenNode reviewer produced a usable answer
+# for every page it was asked to compare. Only set when visual QA was actually
+# attempted (i.e. never alongside a VISUAL_QA_UNAVAILABLE-status result, which
+# means the renderer itself never ran at all).
+VISUAL_QA_REVIEWER_STATUS_AVAILABLE = "AVAILABLE"
+VISUAL_QA_REVIEWER_STATUS_UNAVAILABLE = "UNAVAILABLE"
 
 _VISUAL_CHECK_KEYS = (
     "logo",
@@ -142,7 +178,25 @@ class VisualQAUnavailableError(DocumentQAError):
 class GreenNodeVisionQAError(DocumentQAError):
     """Raised when the GreenNode visual reviewer call fails or returns malformed output.
 
-    Any occurrence of this exception must be treated as fail-closed (FAIL), never PASS.
+    A plain GreenNodeVisionQAError (not the more specific subclass below) is a
+    genuine, non-retryable problem (e.g. a 401/403 auth/config error) and must
+    still be treated as fail-closed (FAIL), never PASS.
+    """
+
+
+class GreenNodeVisualQAReviewerUnavailableError(GreenNodeVisionQAError):
+    """Raised when the GreenNode visual reviewer failed to produce a usable
+    structured result for a page even after bounded retry: empty response,
+    timeout, malformed/schema-invalid response, or exhausted transient HTTP
+    (429/5xx) retry.
+
+    This is explicitly NOT evidence that the rendered document page itself is
+    defective -- it means the external AI reviewer failed to answer. Callers
+    must map this to the non-blocking REVIEWER_UNAVAILABLE condition
+    (visual_qa_status="UNAVAILABLE", overall PASS_WITH_WARNING when
+    deterministic checks passed), never to a blocking FAIL. It remains a
+    subclass of GreenNodeVisionQAError so any caller that only wants to
+    generically detect "the visual reviewer had a problem" still catches it.
     """
 
 
@@ -792,6 +846,12 @@ class GreenNodeVisualQAAgent:
         )
 
     def compare_page(self, template_b64_png: str, generated_b64_png: str, page_num: int) -> Dict[str, Any]:
+        """Compares one page pair. Retries up to VISUAL_QA_CONTENT_MAX_ATTEMPTS
+        TOTAL times (a separate, independent axis from the network-level retry
+        inside _compare_page_once) whenever the reviewer failed to produce a
+        usable structured result (GreenNodeVisualQAReviewerUnavailableError).
+        A genuine non-retryable error (plain GreenNodeVisionQAError, e.g. a
+        401/403 auth/config problem) propagates immediately without retry."""
         messages = [
             {"role": "system", "content": VISION_QA_SYSTEM_PROMPT},
             {
@@ -812,9 +872,33 @@ class GreenNodeVisualQAAgent:
             },
         ]
 
-        # Only the network/API call itself is retried, and only for the retryable HTTP
-        # status codes below. A successful HTTP call that returns empty/malformed content
-        # is NEVER retried — it fails closed immediately (see below, outside this loop).
+        last_unavailable_error: Optional[GreenNodeVisualQAReviewerUnavailableError] = None
+        for content_attempt in range(1, VISUAL_QA_CONTENT_MAX_ATTEMPTS + 1):
+            try:
+                return self._compare_page_once(messages, page_num)
+            except GreenNodeVisualQAReviewerUnavailableError as exc:
+                last_unavailable_error = exc
+                if content_attempt < VISUAL_QA_CONTENT_MAX_ATTEMPTS:
+                    logger.warning(
+                        "GreenNode visual QA reviewer unavailable page=%s attempt=%d/%d (%s); retrying page.",
+                        page_num, content_attempt, VISUAL_QA_CONTENT_MAX_ATTEMPTS, exc,
+                    )
+
+        raise GreenNodeVisualQAReviewerUnavailableError(
+            f"GreenNode visual QA reviewer unavailable for page {page_num} after "
+            f"{VISUAL_QA_CONTENT_MAX_ATTEMPTS} attempts (last error: {last_unavailable_error})."
+        ) from last_unavailable_error
+
+    def _compare_page_once(self, messages: List[Dict[str, Any]], page_num: int) -> Dict[str, Any]:
+        """Performs exactly one page-compare attempt: the network call (with its
+        own internal 429/5xx/timeout retry budget of MAX_VISUAL_QA_ATTEMPTS),
+        then empty-content and JSON/schema validation.
+
+        Raises GreenNodeVisualQAReviewerUnavailableError for anything meaning
+        "the reviewer didn't produce a usable result" (timeout, empty content,
+        malformed/schema-invalid response, or exhausted transient-HTTP retry).
+        Raises plain GreenNodeVisionQAError (never retried by the caller) for a
+        genuine non-retryable API error (e.g. 401/403/400)."""
         response = None
         for attempt in range(1, MAX_VISUAL_QA_ATTEMPTS + 1):
             start_time = time.perf_counter()
@@ -826,6 +910,29 @@ class GreenNodeVisualQAAgent:
                     max_tokens=1024,
                 )
                 break
+            except APITimeoutError as exc:
+                latency_ms = (time.perf_counter() - start_time) * 1000.0
+                if attempt < MAX_VISUAL_QA_ATTEMPTS:
+                    wait_seconds = self._compute_retry_wait_seconds(exc, attempt)
+                    logger.warning(
+                        "GreenNode visual QA page %s: timeout on attempt %d/%d, waiting %.2fs before retry.",
+                        page_num, attempt, MAX_VISUAL_QA_ATTEMPTS, wait_seconds,
+                    )
+                    self._record_telemetry(
+                        page_num, latency_ms, success=False,
+                        error=f"timeout (retrying, attempt {attempt}/{MAX_VISUAL_QA_ATTEMPTS})",
+                    )
+                    time.sleep(wait_seconds)
+                    continue
+
+                logger.warning(
+                    "GreenNode visual QA page %s: timeout retry attempts exhausted (%d/%d).",
+                    page_num, attempt, MAX_VISUAL_QA_ATTEMPTS,
+                )
+                self._record_telemetry(page_num, latency_ms, success=False, error="timeout (retry exhausted)")
+                raise GreenNodeVisualQAReviewerUnavailableError(
+                    f"GreenNode visual QA timed out for page {page_num} after {MAX_VISUAL_QA_ATTEMPTS} attempts."
+                ) from exc
             except Exception as exc:
                 latency_ms = (time.perf_counter() - start_time) * 1000.0
                 status_code = getattr(exc, "status_code", None)
@@ -846,7 +953,8 @@ class GreenNodeVisualQAAgent:
                     continue
 
                 if retryable:
-                    # Exhausted all retry attempts on a retryable error -> fail closed.
+                    # Exhausted all retry attempts on a retryable error -> the
+                    # reviewer is unavailable, NOT evidence the DOCX is bad.
                     logger.warning(
                         "GreenNode visual QA page %s: retry attempts exhausted (%d/%d) after HTTP %s.",
                         page_num, attempt, MAX_VISUAL_QA_ATTEMPTS, status_code,
@@ -855,12 +963,14 @@ class GreenNodeVisualQAAgent:
                         page_num, latency_ms, success=False,
                         error=f"HTTP {status_code} (retry exhausted)",
                     )
-                    raise GreenNodeVisionQAError(
+                    raise GreenNodeVisualQAReviewerUnavailableError(
                         f"GreenNode visual QA rate limit/retry exhausted for page {page_num} "
                         f"after {MAX_VISUAL_QA_ATTEMPTS} attempts (last HTTP {status_code})."
                     ) from exc
 
-                # Non-retryable error: fail closed immediately, no retry.
+                # Non-retryable error (e.g. 401/403/400): a genuine config/auth
+                # problem, not "reviewer momentarily unavailable" -- fail closed
+                # immediately, no retry at either axis.
                 self._record_telemetry(
                     page_num, latency_ms, success=False,
                     error=f"HTTP {status_code}" if status_code is not None else "non-retryable error",
@@ -873,10 +983,23 @@ class GreenNodeVisualQAAgent:
         content = response.choices[0].message.content if response.choices else None
         if not content or not content.strip():
             self._record_telemetry(page_num, latency_ms, success=False, error="empty response")
-            raise GreenNodeVisionQAError(f"GreenNode visual QA returned empty content for page {page_num}.")
+            raise GreenNodeVisualQAReviewerUnavailableError(
+                f"GreenNode visual QA returned empty content for page {page_num}."
+            )
 
-        parsed_raw = _parse_strict_json(content, page_num)
-        parsed = _validate_visual_schema(parsed_raw, page_num)
+        try:
+            parsed_raw = _parse_strict_json(content, page_num)
+            parsed = _validate_visual_schema(parsed_raw, page_num)
+        except GreenNodeVisionQAError as exc:
+            # Malformed/non-JSON or schema-invalid response: the reviewer
+            # answered, but didn't produce a usable structured result -- same
+            # "reviewer unavailable" bucket as empty content/timeout, never a
+            # genuine visual defect finding.
+            self._record_telemetry(page_num, latency_ms, success=False, error="malformed response")
+            raise GreenNodeVisualQAReviewerUnavailableError(
+                f"GreenNode visual QA returned a malformed/unusable response for page {page_num}: {exc}"
+            ) from exc
+
         self._record_telemetry(page_num, latency_ms, success=True)
         return parsed
 
@@ -937,6 +1060,7 @@ def _build_result(
     issues: List[str],
     model_name: Optional[str],
     timestamp: str,
+    visual_qa_status: Optional[str] = None,
 ) -> Dict[str, Any]:
     return {
         "status": status,
@@ -945,6 +1069,14 @@ def _build_result(
         "issues": issues,
         "model": model_name,
         "qa_timestamp": timestamp,
+        # Whether the GreenNode AI reviewer produced a usable answer for every
+        # page it was asked to compare (VISUAL_QA_REVIEWER_STATUS_AVAILABLE /
+        # _UNAVAILABLE). None when visual QA was never attempted at all (e.g.
+        # deterministic FAIL, or the renderer itself is unavailable -- see the
+        # separate, pre-existing VISUAL_QA_UNAVAILABLE top-level status for
+        # that case). Never conflated with a genuine visual defect: reviewer
+        # unavailability alone can only ever produce PASS_WITH_WARNING, never FAIL.
+        "visual_qa_status": visual_qa_status,
     }
 
 
@@ -1032,55 +1164,87 @@ class DocumentQAAgent:
 
             model_name = getattr(agent, "model", None)
             per_category: Dict[str, List[str]] = {k: [] for k in _VISUAL_CHECK_KEYS}
+            reviewer_unavailable_pages: List[int] = []
 
-            try:
-                for i in range(page_pairs):
-                    template_b64 = _file_to_b64_png(template_images[i])
-                    generated_b64 = _file_to_b64_png(generated_images[i])
+            for i in range(page_pairs):
+                template_b64 = _file_to_b64_png(template_images[i])
+                generated_b64 = _file_to_b64_png(generated_images[i])
+                try:
                     page_result = agent.compare_page(template_b64, generated_b64, page_num=i + 1)
-
-                    for key in per_category:
-                        per_category[key].append(page_result.get(key, STATUS_UNKNOWN))
-
-                    for item in page_result.get("issues", []) or []:
-                        issues.append(f"[page {i + 1}] {item}")
-
-                    # Small pacing delay between successful page calls (separate from retry
-                    # backoff) to stay comfortably under GreenNode rate limits.
+                except GreenNodeVisualQAReviewerUnavailableError as exc:
+                    # Reviewer unavailable for this page even after bounded retry.
+                    # This is NOT evidence the rendered page is defective -- record
+                    # it explicitly and keep evaluating the remaining pages; it can
+                    # only ever push the overall result to PASS_WITH_WARNING, never FAIL.
+                    reviewer_unavailable_pages.append(i + 1)
+                    issues.append(f"⚠ Page {i + 1} — AI reviewer unavailable: {exc}")
+                    logger.warning("GreenNode visual QA page %s: reviewer unavailable, continuing remaining pages: %s", i + 1, exc)
                     if self.page_delay_seconds > 0 and i < page_pairs - 1:
                         time.sleep(self.page_delay_seconds)
-            except GreenNodeVisionQAError as exc:
-                issues.append(f"GreenNode visual QA failed (fail-closed): {exc}")
-                return _build_result(
-                    STATUS_FAIL, deterministic_checks, _blank_visual_checks(), issues, model_name, timestamp
-                )
+                    continue
+                except GreenNodeVisionQAError as exc:
+                    # Genuine non-retryable reviewer error (e.g. auth/config) --
+                    # unchanged fail-closed behavior, abort the whole visual QA pass.
+                    issues.append(f"GreenNode visual QA failed (fail-closed): {exc}")
+                    return _build_result(
+                        STATUS_FAIL, deterministic_checks, _blank_visual_checks(), issues, model_name, timestamp
+                    )
+
+                for key in per_category:
+                    per_category[key].append(page_result.get(key, STATUS_UNKNOWN))
+
+                for item in page_result.get("issues", []) or []:
+                    issues.append(f"[page {i + 1}] {item}")
+
+                # Small pacing delay between successful page calls (separate from retry
+                # backoff) to stay comfortably under GreenNode rate limits.
+                if self.page_delay_seconds > 0 and i < page_pairs - 1:
+                    time.sleep(self.page_delay_seconds)
 
         visual_checks = {key: _worst_status(values) for key, values in per_category.items()}
+        visual_qa_status = (
+            VISUAL_QA_REVIEWER_STATUS_UNAVAILABLE if reviewer_unavailable_pages
+            else VISUAL_QA_REVIEWER_STATUS_AVAILABLE
+        )
 
         # Export policy: only a genuine FAIL on a blocking visual category (logo,
         # header_footer, table_layout, spacing_alignment) fails the whole document and
-        # blocks export. A font_consistency-only FAIL is downgraded to a non-blocking
-        # PASS_WITH_WARNING — the finding stays visible in `issues` and in
-        # visual_checks['font_consistency'] (still reported as FAIL there), it just
-        # doesn't gate export. Deterministic checks are never affected by this policy.
+        # blocks export. A font_consistency-only FAIL, and/or the AI reviewer being
+        # unavailable (empty/timeout/malformed response, or exhausted transient-HTTP
+        # retry) for one or more pages after bounded retry, is downgraded to a
+        # non-blocking PASS_WITH_WARNING — the finding stays visible in `issues`
+        # (and, for font_consistency, in visual_checks['font_consistency']), it just
+        # doesn't gate export. Deterministic checks are never affected by this policy,
+        # and a genuine blocking visual FAIL still wins over reviewer-unavailability on
+        # any other page.
         has_blocking_visual_fail = any(visual_checks[key] == STATUS_FAIL for key in _BLOCKING_VISUAL_CATEGORIES)
         has_warning_only_fail = any(visual_checks[key] == STATUS_FAIL for key in _WARNING_ONLY_VISUAL_CATEGORIES)
+        has_reviewer_unavailable = bool(reviewer_unavailable_pages)
 
         if has_blocking_visual_fail:
             visual_checks["overall_visual_fidelity"] = STATUS_FAIL
             overall_status = STATUS_FAIL
-        elif has_warning_only_fail:
+        elif has_warning_only_fail or has_reviewer_unavailable:
             visual_checks["overall_visual_fidelity"] = STATUS_PASS_WITH_WARNING
             overall_status = STATUS_PASS_WITH_WARNING
-            issues.append(
-                "font_consistency reported a rendering difference (non-blocking: cross-platform "
-                "font-substitution findings do not block export per policy). Review before finalizing."
-            )
+            if has_reviewer_unavailable:
+                issues.append(
+                    "Kiểm định cấu trúc tài liệu đã đạt. AI Visual QA tạm thời không phản hồi đầy đủ; "
+                    "tài liệu vẫn được phép xuất."
+                )
+            if has_warning_only_fail:
+                issues.append(
+                    "font_consistency reported a rendering difference (non-blocking: cross-platform "
+                    "font-substitution findings do not block export per policy). Review before finalizing."
+                )
         else:
             visual_checks["overall_visual_fidelity"] = STATUS_PASS
             overall_status = STATUS_PASS
 
-        return _build_result(overall_status, deterministic_checks, visual_checks, issues, model_name, timestamp)
+        return _build_result(
+            overall_status, deterministic_checks, visual_checks, issues, model_name, timestamp,
+            visual_qa_status=visual_qa_status,
+        )
 
 
 def run_document_qa_gate(
@@ -1091,16 +1255,23 @@ def run_document_qa_gate(
 
     - status PASS -> returns qa_result, caller may export.
     - status PASS_WITH_WARNING -> returns qa_result (does NOT raise); deterministic checks
-      passed and the only visual-QA failure is font_consistency (non-blocking per policy —
-      cross-platform font-substitution rendering differences). Caller may export, but MUST
-      surface the warning explicitly (never silently treat it as a clean PASS).
+      passed, and the visual-QA layer produced either (a) a font_consistency-only finding
+      (non-blocking per policy — cross-platform font-substitution rendering differences),
+      and/or (b) the GreenNode AI reviewer failed to produce a usable answer for one or
+      more pages even after bounded retry (empty response, timeout, malformed response, or
+      exhausted transient 429/5xx retry — see visual_qa_status="UNAVAILABLE"). Neither case
+      is evidence the generated DOCX is defective. Caller may export, but MUST surface the
+      warning explicitly (never silently treat it as a clean PASS).
     - status VISUAL_QA_UNAVAILABLE -> returns qa_result (does NOT raise); deterministic checks
-      already passed, but visual fidelity could not be verified in this environment. Caller
-      decides whether to still allow export, but MUST surface this state explicitly (never
-      silently treat it as PASS).
+      already passed, but the visual RENDERER itself (LibreOffice/pypdfium2) could not run in
+      this environment, so no page images were ever produced. Caller decides whether to still
+      allow export, but MUST surface this state explicitly (never silently treat it as PASS).
+      Distinct from visual_qa_status="UNAVAILABLE" above, where rendering succeeded but the AI
+      reviewer specifically did not answer.
     - status FAIL -> raises DocumentQAFailedError carrying the full qa_result; caller must
-      block export. This includes: any deterministic check failing, or a genuine visual
-      FAIL on logo/header_footer/table_layout/spacing_alignment.
+      block export. This includes: any deterministic check failing, the reviewer could not be
+      initialized, a genuine non-retryable reviewer API error (e.g. 401/403), or a genuine
+      well-formed visual FAIL on logo/header_footer/table_layout/spacing_alignment.
     """
     agent = DocumentQAAgent(template_path=template_path)
     result = agent.run_qa(generated_docx_path)

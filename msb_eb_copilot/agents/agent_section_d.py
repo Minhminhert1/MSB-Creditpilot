@@ -1,7 +1,7 @@
 """
 Agent Section D: TÌNH HÌNH TÀI CHÍNH DOANH NGHIỆP (Chuẩn 100% Format Mẫu MB07 MSB & Thẩm định KHDN Lớn)
 Đối chiếu trực tiếp:
-- MB07 Tờ trình đề xuất cấp tín dụng (ĐVKD) - Tho.docx
+- MB07 Tờ trình đề xuất cấp tín dụng (ĐVKD) - bản tham khảo.docx
 - THÉP TÂY ĐÔ_ Tờ trình_2026.docx
 """
 

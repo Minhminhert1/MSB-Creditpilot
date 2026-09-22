@@ -37,7 +37,9 @@ from msb_eb_copilot.src.document_qa_agent import (
     DocxPageRenderer,
     GreenNodeVisionQAError,
     GreenNodeVisualQAAgent,
+    GreenNodeVisualQAReviewerUnavailableError,
     MAX_VISUAL_QA_ATTEMPTS,
+    VISUAL_QA_CONTENT_MAX_ATTEMPTS,
     STATUS_FAIL,
     STATUS_PASS,
     STATUS_PASS_WITH_WARNING,
@@ -344,6 +346,36 @@ class TestDocumentQAOrchestrator(unittest.TestCase):
         self.assertEqual(result["status"], STATUS_FAIL)
         self.assertTrue(any("fail-closed" in i.lower() for i in result["issues"]))
 
+    def test_07b_reviewer_unavailable_downgrades_to_pass_with_warning_not_fail(self):
+        """URGENT HACKATHON FIX: the AI reviewer failing to answer (empty
+        response / timeout / malformed response / exhausted transient retry,
+        represented here by GreenNodeVisualQAReviewerUnavailableError) must
+        NEVER be treated the same as test_07's genuine GreenNodeVisionQAError
+        above -- it is not evidence the DOCX is bad, so it must downgrade to a
+        non-blocking PASS_WITH_WARNING (export allowed) instead of FAIL."""
+        agent = DocumentQAAgent(
+            template_path=self.template_path,
+            renderer=_FakeRenderer,
+            vision_agent_factory=lambda: _FakeVisionAgent(
+                raise_error=GreenNodeVisualQAReviewerUnavailableError(
+                    "GreenNode visual QA returned empty content for page 1 (simulated, bounded retry exhausted)."
+                )
+            ),
+        )
+        result = agent.run_qa(self.compatible_docx)
+
+        self.assertEqual(result["status"], STATUS_PASS_WITH_WARNING)
+        self.assertEqual(result["visual_qa_status"], "UNAVAILABLE")
+        self.assertTrue(any("AI reviewer unavailable" in i for i in result["issues"]))
+        self.assertTrue(any("AI Visual QA tạm thời không phản hồi đầy đủ" in i for i in result["issues"]))
+        # Deterministic checks are untouched by this policy.
+        self.assertTrue(all(v == STATUS_PASS for v in result["deterministic_checks"].values()))
+
+        # Export must be allowed: run_document_qa_gate must NOT raise.
+        with patch("msb_eb_copilot.src.document_qa_agent.DocumentQAAgent", return_value=agent):
+            gated_result = run_document_qa_gate(self.compatible_docx, template_path=self.template_path)
+        self.assertEqual(gated_result["status"], STATUS_PASS_WITH_WARNING)
+
     def test_08_visual_qa_unavailable_does_not_silently_pass(self):
         agent = DocumentQAAgent(
             template_path=self.template_path,
@@ -633,16 +665,26 @@ class TestGreenNodeRetryPolicy(unittest.TestCase):
 
     @patch("openai.resources.chat.completions.Completions.create")
     def test_429_exhausted_fails_closed_with_explicit_message(self, mock_create):
+        """429 exhaustion is a REVIEWER_UNAVAILABLE condition, not a genuine
+        visual defect: it is retried at BOTH the network-level axis (up to
+        MAX_VISUAL_QA_ATTEMPTS per page-compare attempt) AND the independent
+        content-level axis (up to VISUAL_QA_CONTENT_MAX_ATTEMPTS total
+        page-compare attempts) before finally raising
+        GreenNodeVisualQAReviewerUnavailableError (a GreenNodeVisionQAError
+        subclass -- see document_qa_agent.py's two-axis retry design,
+        mirroring pdf_ocr.py's OCR_MAX_CONTENT_ATTEMPTS precedent)."""
         err_429 = _mock_status_error(openai.RateLimitError, 429)
-        mock_create.side_effect = [err_429, err_429, err_429, err_429, err_429]
+        total_calls = MAX_VISUAL_QA_ATTEMPTS * VISUAL_QA_CONTENT_MAX_ATTEMPTS
+        mock_create.side_effect = [err_429] * total_calls
 
         agent = GreenNodeVisualQAAgent(api_key="mock_key")
-        with self.assertRaises(GreenNodeVisionQAError) as ctx:
+        with self.assertRaises(GreenNodeVisualQAReviewerUnavailableError) as ctx:
             agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=3)
 
-        self.assertIn("GreenNode visual QA rate limit/retry exhausted", str(ctx.exception))
-        self.assertEqual(mock_create.call_count, MAX_VISUAL_QA_ATTEMPTS)
-        self.assertEqual(self.mock_sleep.call_count, MAX_VISUAL_QA_ATTEMPTS - 1)
+        self.assertIn("reviewer unavailable", str(ctx.exception).lower())
+        self.assertIn("rate limit/retry exhausted", str(ctx.exception).lower())
+        self.assertEqual(mock_create.call_count, total_calls)
+        self.assertEqual(self.mock_sleep.call_count, (MAX_VISUAL_QA_ATTEMPTS - 1) * VISUAL_QA_CONTENT_MAX_ATTEMPTS)
 
     @patch("openai.resources.chat.completions.Completions.create")
     def test_500_retry_then_success_yields_pass(self, mock_create):
@@ -682,14 +724,19 @@ class TestGreenNodeRetryPolicy(unittest.TestCase):
         self.mock_sleep.assert_called_once_with(7.0)
 
     @patch("openai.resources.chat.completions.Completions.create")
-    def test_malformed_json_is_not_retried(self, mock_create):
+    def test_malformed_json_is_not_retried_at_network_level(self, mock_create):
+        """Malformed JSON is never retried WITHIN one page-compare network call
+        (mock_create is called exactly once per content attempt) -- but IS
+        retried at the independent content-level axis (bounded, at most
+        VISUAL_QA_CONTENT_MAX_ATTEMPTS total attempts), since a malformed
+        response means the reviewer failed to answer, not that the DOCX is bad."""
         mock_create.return_value = _mock_success_response("this is not JSON at all")
 
         agent = GreenNodeVisualQAAgent(api_key="mock_key")
-        with self.assertRaises(GreenNodeVisionQAError):
+        with self.assertRaises(GreenNodeVisualQAReviewerUnavailableError):
             agent.compare_page("dGVtcGxhdGU=", "Z2VuZXJhdGVk", page_num=1)
 
-        self.assertEqual(mock_create.call_count, 1)
+        self.assertEqual(mock_create.call_count, VISUAL_QA_CONTENT_MAX_ATTEMPTS)
         self.mock_sleep.assert_not_called()
 
     @patch("openai.resources.chat.completions.Completions.create")

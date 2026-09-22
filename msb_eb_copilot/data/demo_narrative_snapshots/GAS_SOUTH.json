@@ -1,0 +1,92 @@
+{
+  "case_id": "GAS_SOUTH",
+  "execution_provenance": {
+    "ai_calls": 0,
+    "builder": "scripts/build_demo_narrative_snapshots.py",
+    "generated_at": "2026-09-22T03:54:39.478102+00:00",
+    "greennode_calls": 0,
+    "method": "deterministic_local",
+    "network_calls": 0
+  },
+  "model_id": "DETERMINISTIC_DEMO_SNAPSHOT",
+  "narrative_blocks": [
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "LEGAL_NAME",
+        "LEGAL_SHORT_NAME",
+        "LEGAL_TAX_CODE",
+        "BIZ_MODEL",
+        "PARENT_GROUP",
+        "LEGAL_CHARTER_CAPITAL",
+        "LEGAL_ADDRESS"
+      ],
+      "insights_used": [],
+      "section": "BUSINESS",
+      "target_binding": "business_overview",
+      "text": "Tên doanh nghiệp: CÔNG TY CỔ PHẦN KINH DOANH KHÍ MIỀN NAM. Tên viết tắt: GAS SOUTH JSC (PGS). Mã số thuế: 0304958184. Mô hình kinh doanh: SAN_XUAT_VA_THUONG_MAI. Công ty mẹ / Tập đoàn: TỔNG CÔNG TY KHÍ VIỆT NAM (PV GAS). Vốn điều lệ: 500,0 tỷ đồng. Địa chỉ trụ sở: Lầu 4, Tòa nhà PetroVietnam, Số 1-5 Lê Duẩn, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh.",
+      "title": "Tổng quan doanh nghiệp"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "LEGAL_REP_NAME",
+        "BIZ_MANAGEMENT"
+      ],
+      "insights_used": [],
+      "section": "BUSINESS",
+      "target_binding": "management_summary",
+      "text": "Người đại diện pháp luật: Đặng Văn Vĩnh. Quy mô ban điều hành: 3 thành viên.",
+      "title": "Ban điều hành & Người đại diện pháp luật"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "FIN_REV_2025",
+        "FIN_NP_2025",
+        "FIN_EQ_2025",
+        "FIN_STD_2025",
+        "RATIO_CURRENT_RATIO_2025",
+        "RATIO_ROE_2025",
+        "RATIO_REVENUE_GROWTH_2025"
+      ],
+      "insights_used": [],
+      "section": "FINANCIAL",
+      "target_binding": "pnl_analysis",
+      "text": "Doanh thu thuần năm 2025: 6520,0 tỷ đồng. Lợi nhuận sau thuế năm 2025: 122,0 tỷ đồng. Vốn chủ sở hữu năm 2025: 1250,0 tỷ đồng. Nợ vay ngắn hạn năm 2025: 890,0 tỷ đồng. Hệ số thanh toán hiện hành (Current Ratio) năm 2025: 2,4 lần. Tỷ suất sinh lời vốn chủ sở hữu (ROE) năm 2025: 9,8%. Tăng trưởng doanh thu năm 2025: 6,5%.",
+      "title": "Tổng hợp tài chính năm 2025"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "CIC_HISTORY_STATUS",
+        "CIC_IS_OVERDUE_12M",
+        "CIC_MSB_OUTSTANDING",
+        "CIC_OTHER_BANKS_DEBT",
+        "REQ_TOTAL_LIMIT",
+        "REQ_LOAN_LIMIT",
+        "REQ_GUARANTEE_LIMIT"
+      ],
+      "insights_used": [],
+      "section": "CIC",
+      "target_binding": "cic_summary",
+      "text": "Phân loại nợ CIC: 100% Nhóm 1 tại tất cả các TCTD trong suốt lịch sử quan hệ tín dụng.. Nợ quá hạn trong 12 tháng gần nhất: Không phát sinh nợ quá hạn. Dư nợ tại MSB: 120,0 tỷ đồng. Dư nợ tại các TCTD khác: 0,0 tỷ đồng. Tổng hạn mức đề xuất: 500,0 tỷ đồng. Hạn mức cho vay: 200,0 tỷ đồng. Hạn mức bảo lãnh: 50,0 tỷ đồng.",
+      "title": "Tổng hợp quan hệ tín dụng & Đề xuất cấp tín dụng"
+    },
+    {
+      "data_gaps": [],
+      "facts_used": [
+        "RATIO_DEBT_TO_EQUITY_2025",
+        "RATIO_QUICK_RATIO_2025",
+        "RATIO_CASH_RATIO_2025"
+      ],
+      "insights_used": [],
+      "section": "FINANCIAL",
+      "target_binding": "risk_observation_summary",
+      "text": "Đòn bẩy tài chính (Debt/Equity) năm 2025: 1,7 lần. Khả năng thanh toán nhanh (Quick Ratio) năm 2025: 1,9 lần. Khả năng thanh toán bằng tiền (Cash Ratio) năm 2025: 0,5 lần.",
+      "title": "Quan sát rủi ro tài chính năm 2025"
+    }
+  ],
+  "source_manifest_hash": "338d2dc788baf7554b0a764a63633b36fa10970da3c983fd0fee88dd9698e113",
+  "verified_insights": []
+}
