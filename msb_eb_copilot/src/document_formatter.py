@@ -16,6 +16,7 @@ import os
 import re
 from typing import Optional
 import docx
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 
 
@@ -153,12 +154,60 @@ class DocumentFormatter:
             pass
 
     @staticmethod
+    def fix_multiline_spacing_and_bullets(doc: docx.Document) -> None:
+        """Fix stretched word spacing and unwanted bullets on multiline/narrative paragraphs.
+
+        When paragraphs populated with multiline text (containing \n -> <w:br/>) retain the
+        template's justified alignment (<w:jc w:val="both"/>), Microsoft Word full-justifies
+        every line terminated by a soft break across the entire margin width, stretching words
+        with huge unnatural spaces (e.g. 'Đánh        giá        chất        lượng...').
+
+        This helper:
+        1. Identifies paragraphs containing soft line breaks (<w:br/> or '\n').
+        2. If alignment is justified ('both' or 'distribute'), sets alignment to LEFT so
+           Word does not stretch words across the page.
+        3. If it contains multiline text and carries a leftover template bullet (<w:numPr>),
+           removes the bullet and list indentation so the narrative is cleanly formatted.
+        """
+        for p in doc.paragraphs:
+            has_br = len(p._p.xpath(".//w:br")) > 0 or "\n" in p.text
+            if not has_br:
+                continue
+
+            jc = p._p.xpath(".//w:jc")
+            if jc:
+                jc_val = jc[0].get(qn("w:val"), "").lower()
+                if jc_val in ("both", "distribute"):
+                    p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+            numPr = p._p.xpath(".//w:numPr")
+            if numPr:
+                p._p.pPr.remove(numPr[0])
+                ind = p._p.xpath(".//w:ind")
+                if ind:
+                    p._p.pPr.remove(ind[0])
+
+        for tbl in doc.tables:
+            for row in tbl.rows:
+                for cell in row.cells:
+                    for p in cell.paragraphs:
+                        has_br = len(p._p.xpath(".//w:br")) > 0 or "\n" in p.text
+                        if not has_br:
+                            continue
+                        jc = p._p.xpath(".//w:jc")
+                        if jc:
+                            jc_val = jc[0].get(qn("w:val"), "").lower()
+                            if jc_val in ("both", "distribute"):
+                                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+
+    @staticmethod
     def polish(doc_path: str, output_path: Optional[str] = None, keep_highlights: bool = False) -> str:
         """Perform fidelity-safe polish on the proposal document.
 
         Strict invariants:
         - Preserves authoritative template font sizes, font names, styles, alignments, and spacing.
         - Preserves all drawings, images, logo relationships, headers, footers, and section geometries.
+        - Fixes stretched word spacing on multiline paragraphs without altering unmodified template paragraphs.
         - Strips yellow highlights and shading if keep_highlights=False.
         - Cleans explicitly known placeholder dot lines strictly at the run level.
         - Clears document-level author/last-modified-by metadata (privacy: never carries
@@ -173,13 +222,16 @@ class DocumentFormatter:
         # 1. Safe placeholder cleanup strictly within runs
         DocumentFormatter.clean_known_placeholders_in_runs(doc)
 
-        # 2. Safe highlight and shading removal when keep_highlights is False
+        # 2. Fix stretched spacing and unwanted bullets on multiline paragraphs
+        DocumentFormatter.fix_multiline_spacing_and_bullets(doc)
+
+        # 3. Safe highlight and shading removal when keep_highlights is False
         if not keep_highlights:
             DocumentFormatter.strip_highlights_and_shading(doc)
 
-        # 3. Safe author/last-modified-by metadata scrub (docProps/core.xml only)
+        # 4. Safe author/last-modified-by metadata scrub (docProps/core.xml only)
         DocumentFormatter.strip_author_metadata(doc)
 
-        # 4. Save without structural alteration
+        # 5. Save without structural alteration
         doc.save(output_path)
         return output_path

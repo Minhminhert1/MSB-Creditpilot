@@ -982,10 +982,17 @@ class MB07InPlaceMutator:
                     "+ Doanh số giải ngân & thu nợ: Lũy kế 11 tháng năm 2025, doanh số giải ngân đạt 688.007 triệu đồng, doanh số thu nợ đạt 189.210 triệu đồng. Khách hàng luôn chủ động cân đối dòng tiền bán lẻ để thanh toán gốc và lãi đúng hạn 100%, không để phát sinh nợ quá hạn.\n"
                     "+ Dòng tiền chuyển về MSB: Doanh số dòng tiền về tài khoản MSB 11 tháng đạt 768.446 triệu đồng, tương đương 112% cam kết dòng tiền theo quyết định phê duyệt (vượt cam kết 12%)."
                 )
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                numPr = p._p.xpath(".//w:numPr")
+                if numPr:
+                    p._p.pPr.remove(numPr[0])
+                ind = p._p.xpath(".//w:ind")
+                if ind:
+                    p._p.pPr.remove(ind[0])
                 for r in p.runs:
                     r.font.name = "Times New Roman"
                     r.font.size = Pt(10)
-            elif "Đánh giá chất lượng tín dụng của Khách hàng, so sánh với CIC gần nhất" in txt or "Uy tín trong việc trả nợ, lý do quá hạn" in txt:
+            elif "Đánh giá chất lượng tín dụng của Khách hàng, so sánh với CIC gần nhất" in txt:
                 if accepted_narratives and "cic_summary" in accepted_narratives:
                     p.text = f"Đánh giá chất lượng tín dụng theo CIC toàn hệ thống:\n{accepted_narratives['cic_summary']}"
                 elif getattr(data_e, "cic_narrative", None):
@@ -998,6 +1005,29 @@ class MB07InPlaceMutator:
                         f"+ Lịch sử tín dụng: Dư nợ tại MSB và các TCTD khác được ghi nhận theo dữ liệu CIC chuẩn mực.\n"
                         f"+ Đánh giá người có liên quan: Rà soát phân loại nhóm nợ theo quy định của MSB và NHNN."
                     )
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                numPr = p._p.xpath(".//w:numPr")
+                if numPr:
+                    p._p.pPr.remove(numPr[0])
+                ind = p._p.xpath(".//w:ind")
+                if ind:
+                    p._p.pPr.remove(ind[0])
+                for r in p.runs:
+                    r.font.name = "Times New Roman"
+                    r.font.size = Pt(10)
+            elif "Uy tín trong việc trả nợ, lý do quá hạn" in txt:
+                if getattr(data_e, "is_overdue_12m", False):
+                    overdue_expl = getattr(data_e, "overdue_explanation", "") or "Đang được ĐVKD theo dõi và quản lý thu hồi nợ."
+                    p.text = f"Uy tín trong việc trả nợ, lý do quá hạn: Khách hàng có phát sinh nợ quá hạn trong 12 tháng qua. Lý do: {overdue_expl}"
+                else:
+                    p.text = "Uy tín trong việc trả nợ, lý do quá hạn: Khách hàng không phát sinh nợ quá hạn trong 12 tháng gần nhất tại MSB và các TCTD khác; thanh toán nợ gốc, lãi đầy đủ, đúng hạn."
+                p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                numPr = p._p.xpath(".//w:numPr")
+                if numPr:
+                    p._p.pPr.remove(numPr[0])
+                ind = p._p.xpath(".//w:ind")
+                if ind:
+                    p._p.pPr.remove(ind[0])
                 for r in p.runs:
                     r.font.name = "Times New Roman"
                     r.font.size = Pt(10)
